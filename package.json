@@ -1,0 +1,40 @@
+{
+  "name": "steam-calendar",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "install:local": "bash scripts/install.sh",
+    "dev:local": "bash scripts/dev.sh",
+    "build": "next build",
+    "start": "next start",
+    "start:local": "bash scripts/start.sh",
+    "check": "bash scripts/check.sh",
+    "docker:build": "bash scripts/docker-build.sh",
+    "docker:run": "bash scripts/docker-run.sh",
+    "docker:compose": "docker compose up --build --detach",
+    "docker:compose:down": "docker compose down",
+    "docker:compose:logs": "docker compose logs -f app",
+    "lint": "eslint",
+    "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "verify:calendar-session": "node --experimental-strip-types scripts/verify-calendar-session.ts",
+    "measure:sqlite-latency": "node --experimental-strip-types scripts/measure-sqlite-latency.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "iron-session": "^9.0.1",
+    "next": "16.4.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.4",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
