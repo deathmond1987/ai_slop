@@ -10,6 +10,7 @@
     "start": "next start",
     "start:local": "bash scripts/start.sh",
     "check": "bash scripts/check.sh",
+    "typegen": "next typegen",
     "docker:build": "bash scripts/docker-build.sh",
     "docker:run": "bash scripts/docker-run.sh",
     "docker:compose": "docker compose up --build --detach",
