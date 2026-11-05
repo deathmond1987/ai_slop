@@ -11,6 +11,7 @@ import {
   parseJsonCountResponse,
   parseJsonWishlistResponse,
   parseWishlistPageResult,
+  shouldFetchWishlistPage,
 } from "./wishlist-core";
 import type { ApiWishlistItem, ApiWishlistResult, WishlistItem } from "./wishlist-core";
 
@@ -111,6 +112,7 @@ async function fetchWishlistApiMethod(
 }
 
 async function fetchWishlistApi(steamId: string): Promise<ApiWishlistResult> {
+  const jsonStart = Date.now();
   const [countJson, listJson] = await Promise.all([
     fetchWishlistJsonMethod(steamId, "GetWishlistItemCount"),
     fetchWishlistJsonMethod(steamId, "GetWishlist"),
@@ -121,6 +123,7 @@ async function fetchWishlistApi(steamId: string): Promise<ApiWishlistResult> {
     jsonItems.length > 0 || (countJson.ok && listJson.ok && (jsonCount ?? 0) === 0);
 
   logDebug("wishlist.jsonResult", {
+    ms: Date.now() - jsonStart,
     jsonItemCount: jsonItems.length,
     jsonCount,
     jsonUsable,
@@ -177,7 +180,6 @@ async function finalizeApiWishlist(
   const details =
     enrichAppids.length > 0
       ? await getAppDetails(enrichAppids, {
-          concurrency: 4,
           limit: Math.min(enrichAppids.length, MAX_EXTRA_WISHLIST_METADATA),
         })
       : new Map<number, AppDetails | null>();
@@ -230,11 +232,18 @@ export async function fetchWishlist(steamId: string): Promise<WishlistResult> {
   const inflight = pendingWishlist.get(steamId);
   if (inflight) return inflight;
 
+  const uncachedStart = Date.now();
   const promise = fetchWishlistUncached(steamId).finally(() => {
     pendingWishlist.delete(steamId);
   });
   pendingWishlist.set(steamId, promise);
   const result = await promise;
+  logDebug("wishlist.total", {
+    ms: Date.now() - uncachedStart,
+    items: result.items.length,
+    private: result.private,
+    totalKnown: result.totalKnown ?? null,
+  });
   await setCachedWishlist(steamId, result);
   return result;
 }
@@ -246,7 +255,15 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
     totalKnown: undefined,
   };
 
+  const apiStart = Date.now();
   const api = await fetchWishlistApi(steamId);
+  logDebug("wishlist.phase.api", {
+    ms: Date.now() - apiStart,
+    ok: api.ok,
+    private: api.private,
+    items: api.items.length,
+    count: api.count ?? null,
+  });
 
   if (api.private && api.items.length === 0) {
     return {
@@ -256,21 +273,65 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
     };
   }
 
-  if (api.items.length > 0) {
+  if (shouldFetchWishlistPage(api)) {
+    const pageStart = Date.now();
     const page = await fetchWishlistFromPage(steamId).catch((error) => {
       logDebug("wishlist.pageFetch.failed", { error: sanitizeDebugError(error) });
       return emptyPage;
     });
-    return finalizeApiWishlist(api.items, api.count ?? api.items.length, page.items);
+    logDebug("wishlist.phase.page", {
+      ms: Date.now() - pageStart,
+      skipped: false,
+      items: page.items.length,
+      private: page.private,
+      totalKnown: page.totalKnown ?? null,
+    });
+    const finalizeStart = Date.now();
+    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, page.items);
+    logDebug("wishlist.phase.finalize", {
+      ms: Date.now() - finalizeStart,
+      items: result.items.length,
+      details: result.details?.length ?? 0,
+      totalKnown: result.totalKnown ?? null,
+    });
+    return result;
+  }
+
+  if (api.items.length > 0) {
+    logDebug("wishlist.phase.page", {
+      ms: 0,
+      skipped: true,
+      items: 0,
+      private: false,
+      totalKnown: api.count ?? null,
+    });
+    const finalizeStart = Date.now();
+    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, []);
+    logDebug("wishlist.phase.finalize", {
+      ms: Date.now() - finalizeStart,
+      items: result.items.length,
+      details: result.details?.length ?? 0,
+      totalKnown: result.totalKnown ?? null,
+      pageSkipped: true,
+    });
+    return result;
   }
 
   if (api.ok && (api.count ?? 0) === 0) {
     return { items: [], private: false, totalKnown: 0 };
   }
 
+  const pageStart = Date.now();
   const page = await fetchWishlistFromPage(steamId).catch((error) => {
       logDebug("wishlist.pageFetch.failed", { error: sanitizeDebugError(error) });
       return emptyPage;
+    });
+    logDebug("wishlist.phase.page", {
+      ms: Date.now() - pageStart,
+      skipped: false,
+      items: page.items.length,
+      private: page.private,
+      totalKnown: page.totalKnown ?? null,
     });
 
   if (page.private) {

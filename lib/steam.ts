@@ -4,10 +4,15 @@ import { logDebug, sanitizeDebugError, sanitizeDebugText } from "./debug";
 import { loadWithCacheAndDedupe } from "./cached-dedupe.ts";
 import {
   OWNED_TTL_MS,
-  STEAM_FETCH_TIMEOUT_MS,
   appDetailsCacheKey,
   appDetailsCacheTtl,
   ownedCacheKey,
+  steamAppDetailsConcurrency,
+  steamAppDetailsFallbackEnabled,
+  steamAppDetailsFallbackTimeoutMs,
+  steamAppDetailsMinIntervalMs,
+  steamAppDetailsTimeoutMs,
+  steamFetchTimeoutMs,
 } from "./steam-core.ts";
 
 const API = "https://api.steampowered.com";
@@ -42,14 +47,48 @@ export interface AppDetails {
 }
 
 const pendingOwned = new Map<string, Promise<OwnedGame[]>>();
-const pendingAppDetails = new Map<string, Promise<AppDetails | null>>();
+export type AppDetailsPriority = "normal" | "low";
 
-async function jsonFetch(url: string): Promise<unknown> {
+const pendingAppDetails = new Map<string, Promise<AppDetails | null>>();
+let nextAppDetailsRequestAtMs = 0;
+let activeAppDetailsFetches = 0;
+let activeLowAppDetailsFetches = 0;
+const pendingNormalAppDetailsFetchSlots: Array<() => void> = [];
+const pendingLowAppDetailsFetchSlots: Array<() => void> = [];
+
+async function acquireAppDetailsFetchSlot(priority: AppDetailsPriority = "normal"): Promise<() => void> {
+  const max = steamAppDetailsConcurrency();
+  const lowMax = Math.max(1, Math.min(3, max));
+  const pending = priority === "low" ? pendingLowAppDetailsFetchSlots : pendingNormalAppDetailsFetchSlots;
+  while (
+    activeAppDetailsFetches >= max ||
+    (priority === "low" && activeLowAppDetailsFetches >= lowMax)
+  ) {
+    await new Promise<void>((resolve) => {
+      pending.push(resolve);
+    });
+  }
+
+  activeAppDetailsFetches += 1;
+  if (priority === "low") activeLowAppDetailsFetches += 1;
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+    activeAppDetailsFetches -= 1;
+    if (priority === "low") activeLowAppDetailsFetches -= 1;
+    const next = pendingNormalAppDetailsFetchSlots.shift() ?? pendingLowAppDetailsFetchSlots.shift();
+    if (next) next();
+  };
+}
+
+async function jsonFetch(url: string, timeoutMs = steamFetchTimeoutMs()): Promise<unknown> {
   let status: number | undefined;
   try {
     const res = await fetch(url, {
       cache: "no-store",
-      signal: AbortSignal.timeout(STEAM_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       headers: {
         "User-Agent": "SteamCalendarCompanion/1.0",
         Accept: "application/json,text/plain,*/*",
@@ -90,6 +129,7 @@ export async function getOwnedGames(
 }
 
 async function fetchOwnedGames(steamId: string, key: string): Promise<OwnedGame[]> {
+  const startedAt = Date.now();
   const params = new URLSearchParams({
     key,
     steamid: steamId,
@@ -113,59 +153,120 @@ async function fetchOwnedGames(steamId: string, key: string): Promise<OwnedGame[
     });
   }
 
-  logDebug("steam.ownedGames.loaded", { count: out.length });
+  logDebug("steam.ownedGames.loaded", {
+    count: out.length,
+    ms: Date.now() - startedAt,
+  });
   return out;
 }
 
-async function fetchAppDetails(appid: number): Promise<AppDetails | null> {
+async function reserveAppDetailsRequestSlot(appid: number): Promise<void> {
+  const minIntervalMs = steamAppDetailsMinIntervalMs();
+  if (minIntervalMs <= 0) return;
+
+  const now = Date.now();
+  const waitMs = Math.max(0, nextAppDetailsRequestAtMs - now);
+  const reservedAt = now + waitMs;
+  nextAppDetailsRequestAtMs = reservedAt + minIntervalMs;
+
+  if (waitMs > 0) {
+    logDebug("steam.appdetails.paced", { appid, waitMs });
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+}
+
+async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "normal"): Promise<AppDetails | null> {
+  const startedAt = Date.now();
+  const finish = (details: AppDetails | null): AppDetails | null => {
+    logDebug("steam.appdetails.finished", {
+      appid,
+      ms: Date.now() - startedAt,
+      ok: details !== null,
+    });
+    return details;
+  };
+
   const params = new URLSearchParams({
     appids: String(appid),
     filters: "basic,release_date",
     l: "en",
   });
+  const primaryUrl = `${STORE}/api/appdetails?${params}`;
+  let primaryErrorText = "";
 
   try {
-    const data = (await jsonFetch(`${STORE}/api/appdetails?${params}`)) as Record<
-      string,
-      { success?: boolean; data?: AppDetails }
-    >;
-    const entry = data?.[String(appid)];
-    if (entry?.success && entry.data) return entry.data;
-    logDebug("steam.appdetails.unsuccessful", { appid, success: entry?.success === true });
+    await reserveAppDetailsRequestSlot(appid);
+    const release = await acquireAppDetailsFetchSlot(priority);
+    try {
+      const data = (await jsonFetch(
+        primaryUrl,
+        steamAppDetailsTimeoutMs()
+      )) as Record<string, { success?: boolean; data?: AppDetails }>;
+      const entry = data?.[String(appid)];
+      if (entry?.success && entry.data) return finish(entry.data);
+      logDebug("steam.appdetails.unsuccessful", { appid, success: entry?.success === true });
+    } finally {
+      release();
+    }
   } catch (error) {
+    primaryErrorText = sanitizeDebugError(error);
     logDebug("steam.appdetails.primary_failed", {
       appid,
-      error: sanitizeDebugError(error),
+      error: primaryErrorText,
     });
   }
 
-  params.set("cc", "us");
-  try {
-    const fallbackData = (await jsonFetch(`${STORE}/api/appdetails?${params}`)) as Record<
-      string,
-      { success?: boolean; data?: AppDetails }
-    >;
-    const fallbackEntry = fallbackData?.[String(appid)];
-    if (fallbackEntry?.success && fallbackEntry.data) return fallbackEntry.data;
-    logDebug("steam.appdetails.fallback_unsuccessful", {
-      appid,
-      success: fallbackEntry?.success === true,
-    });
-  } catch (error) {
-    logDebug("steam.appdetails.fallback_failed", {
-      appid,
-      error: sanitizeDebugError(error),
-    });
+  if (!steamAppDetailsFallbackEnabled()) return finish(null);
+
+  const fallbackTimeoutMs = steamAppDetailsFallbackTimeoutMs();
+  const ccParams = new URLSearchParams(params);
+  ccParams.set("cc", "us");
+  const ccUrl = `${STORE}/api/appdetails?${ccParams}`;
+  const preferPrimaryRetry = /timeout|aborted|fetch failed|network/i.test(primaryErrorText);
+  const fallbackAttempts = preferPrimaryRetry
+    ? [
+        { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
+        { url: ccUrl, timeoutMs: fallbackTimeoutMs },
+      ]
+    : [
+        { url: ccUrl, timeoutMs: fallbackTimeoutMs },
+        { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
+      ];
+
+  for (const attempt of fallbackAttempts) {
+    try {
+      await reserveAppDetailsRequestSlot(appid);
+      const release = await acquireAppDetailsFetchSlot(priority);
+      try {
+        const fallbackData = (await jsonFetch(
+          attempt.url,
+          attempt.timeoutMs
+        )) as Record<string, { success?: boolean; data?: AppDetails }>;
+        const fallbackEntry = fallbackData?.[String(appid)];
+        if (fallbackEntry?.success && fallbackEntry.data) return finish(fallbackEntry.data);
+        logDebug("steam.appdetails.fallback_unsuccessful", {
+          appid,
+          success: fallbackEntry?.success === true,
+        });
+      } finally {
+        release();
+      }
+    } catch (fallbackError) {
+      logDebug("steam.appdetails.fallback_failed", {
+        appid,
+        error: sanitizeDebugError(fallbackError),
+      });
+    }
   }
 
-  return null;
+  return finish(null);
 }
 
-async function loadAppDetails(appid: number): Promise<AppDetails | null> {
+async function loadAppDetails(appid: number, priority: AppDetailsPriority = "normal"): Promise<AppDetails | null> {
   return loadWithCacheAndDedupe({
     cacheKey: appDetailsCacheKey(appid),
     pending: pendingAppDetails,
-    factory: () => fetchAppDetails(appid),
+    factory: () => fetchAppDetails(appid, priority),
     ttlMs: appDetailsCacheTtl,
     cacheGet,
     cacheSet,
@@ -174,25 +275,27 @@ async function loadAppDetails(appid: number): Promise<AppDetails | null> {
 
 export async function getAppDetails(
   appids: number[],
-  options: { concurrency?: number; limit?: number } = {}
+  options: { concurrency?: number; limit?: number; priority?: AppDetailsPriority } = {}
 ): Promise<Map<number, AppDetails | null>> {
   const out = new Map<number, AppDetails | null>();
   const ids = Array.from(new Set(appids.filter((id) => Number.isFinite(id))));
   const limit = options.limit ?? ids.length;
   const targets = ids.slice(0, Math.max(0, limit));
-  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 10));
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? steamAppDetailsConcurrency(), 10));
+  const priority = options.priority ?? "normal";
   let cursor = 0;
 
   logDebug("steam.getAppDetails.start", {
     total: ids.length,
     requested: targets.length,
     concurrency,
+    priority,
   });
 
   async function worker(): Promise<void> {
     while (cursor < targets.length) {
       const id = targets[cursor++];
-      const cached = await loadAppDetails(id);
+      const cached = await loadAppDetails(id, priority);
       out.set(id, cached);
     }
   }
