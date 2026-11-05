@@ -3,7 +3,21 @@ import type { CacheGet, CacheSet } from "./cached-dedupe";
 import type { IdentifiedSession } from "./types";
 
 export const UPCOMING_CACHE_PREFIX = "upcoming:v5:";
-export const UPCOMING_CACHE_TTL_MS = 60_000;
+export const UPCOMING_CACHE_TTL_MS = 300_000;
+
+function parsePositiveInt(value: string | undefined): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.round(parsed);
+}
+
+export function upcomingCacheTtlMs(): number {
+  const seconds = parsePositiveInt(process.env.UPCOMING_CACHE_TTL_SECONDS);
+  if (seconds !== undefined) return seconds * 1000;
+  const milliseconds = parsePositiveInt(process.env.UPCOMING_CACHE_TTL_MS);
+  if (milliseconds !== undefined) return milliseconds;
+  return UPCOMING_CACHE_TTL_MS;
+}
 
 export interface UpcomingCacheContext {
   steamId: string;
@@ -77,7 +91,7 @@ export async function loadUpcomingWithCache<T>({
   const cached = await cacheGet<T>(cacheKey);
   if (cached !== undefined) return cached;
 
-  const ttl = ttlMs ?? UPCOMING_CACHE_TTL_MS;
+  const ttl = ttlMs ?? upcomingCacheTtlMs();
   const run = async (): Promise<T> => {
     const value = await factory(cacheKey, apiKeyHash, rawgKeyHash);
     await cacheSet(cacheKey, value, ttl);

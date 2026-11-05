@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildByDateMap,
   buildByYearMap,
+  buildCombinedReleaseGroups,
   buildDateGroups,
   buildMonthGrid,
   buildYearGroups,
@@ -83,6 +84,32 @@ test("year groups keep year-only games only and sort by year", () => {
   );
   assert.equal(groups[0].games[0].appid, 1);
   assert.equal(groups[1].games[0].appid, 2);
+});
+
+test("combined release groups put year-only games after exact dates in the same year", () => {
+  const games = [
+    game(1, "2027-02-01", 2027),
+    game(2, null, 2027),
+    game(3, "2026-11-01", 2026),
+    game(4, null, 2026),
+    game(5, "2027-01-15", 2027),
+    game(6, null, 2028),
+  ];
+  const groups = buildCombinedReleaseGroups(
+    buildDateGroups(buildByDateMap(games)),
+    buildYearGroups(buildByYearMap(games))
+  );
+
+  assert.deepEqual(
+    groups.map((group) => group.key),
+    ["2026-11", "2026-year-only", "2027-01", "2027-02", "2027-year-only", "2028-year-only"]
+  );
+  assert.deepEqual(
+    groups.map((group) => group.kind),
+    ["month", "yearOnly", "month", "month", "yearOnly", "yearOnly"]
+  );
+  assert.equal(groups[1].kind === "yearOnly" ? groups[1].games[0].appid : null, 4);
+  assert.equal(groups[4].kind === "yearOnly" ? groups[4].games[0].appid : null, 2);
 });
 
 test("calendar date helpers parse UTC month starts and shift months across year boundaries", () => {

@@ -7,9 +7,8 @@ const secretFieldPattern =
 
 function debugEnabled(): boolean {
   const raw = process.env.APP_DEBUG;
-  if (raw === "0" || raw === "false") return false;
-  if (raw) return true;
-  return process.env.NODE_ENV !== "test";
+  if (raw === undefined || raw === "") return false;
+  return !(raw === "0" || raw.toLowerCase() === "false");
 }
 
 export function sanitizeDebugText(value: string): string {
@@ -60,5 +59,6 @@ function serializeDebugData(data: unknown): string {
 
 export function logDebug(message: string, data?: unknown): void {
   if (!debugEnabled()) return;
-  process.stdout.write(`[debug] ${sanitizeDebugText(message)}${serializeDebugData(data)}\n`);
+  const now = new Date();
+  process.stdout.write(`[debug] ${now.toISOString()} t=${now.getTime()} ${sanitizeDebugText(message)}${serializeDebugData(data)}\n`);
 }

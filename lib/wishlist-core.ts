@@ -25,6 +25,29 @@ export interface WishlistPageResult {
 }
 
 const STEAM_ASSET_BASE = "https://shared.fastly.steamstatic.com/store_item_assets/";
+export const WISHLIST_PAGE_FALLBACK_DEFAULT_ENABLED = false;
+
+function parseWishlistBooleanEnv(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
+  return fallback;
+}
+
+export function wishlistPageFallbackEnabled(): boolean {
+  return parseWishlistBooleanEnv(
+    process.env.WISHLIST_PAGE_FALLBACK_ENABLED,
+    WISHLIST_PAGE_FALLBACK_DEFAULT_ENABLED
+  );
+}
+
+export function shouldFetchWishlistPage(api: ApiWishlistResult): boolean {
+  if (api.private && api.items.length === 0) return false;
+  if (api.items.length > 0) return wishlistPageFallbackEnabled();
+  if (api.ok && (api.count ?? 0) === 0) return false;
+  return true;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

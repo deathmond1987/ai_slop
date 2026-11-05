@@ -1,5 +1,6 @@
 import { tFor } from "@/lib/i18n";
 import type { Lang, UpcomingGame } from "@/lib/types";
+import { FitBlock } from "./FitBlock";
 import { GameCard } from "./GameCard";
 
 export function TBDSection({ lang, games }: { lang: Lang; games: UpcomingGame[] }) {
@@ -12,16 +13,20 @@ export function TBDSection({ lang, games }: { lang: Lang; games: UpcomingGame[] 
     );
   }
 
+  const rows = Math.ceil(games.length / 2);
+
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <h2 className="text-scale-11 leading-tight font-semibold truncate">
         {t("calendar.tbd.title")} ({games.length})
       </h2>
-      <div className="compact-grid tbd-grid">
-        {games.map((g) => (
-          <GameCard key={`tbd-${g.appid}`} game={g} lang={lang} variant="compact" />
-        ))}
-      </div>
+      <FitBlock rows={rows} className="min-w-0">
+        <div className="compact-grid tbd-grid fit h-full">
+          {games.map((g) => (
+            <GameCard key={`tbd-${g.appid}`} game={g} lang={lang} variant="compact" />
+          ))}
+        </div>
+      </FitBlock>
     </div>
   );
 }

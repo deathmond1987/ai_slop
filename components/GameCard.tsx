@@ -66,32 +66,34 @@ export function GameCard({
                 src={game.headerImage}
                 alt={game.name}
                 fill
-                sizes="120px"
+                sizes="(max-width: 480px) 72px, (max-width: 640px) 96px, 240px"
                 loading="lazy"
                 style={{ objectFit: "cover" }}
               />
             ) : (
               <div className="release-game-image-empty w-full h-full bg-zinc-200 dark:bg-zinc-800" />
             )}
-            <div className="release-game-badges">
-              {isRawg ? (
-                <span className="rounded bg-amber-200 text-amber-900 px-1 py-0 text-scale-9 font-medium">
-                  {t("calendar.notFromSteam")}
-                </span>
-              ) : null}
-              {sourceBadges.map((s) => (
-                <span
-                  key={s}
-                  className="rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9"
-                >
-                  {s}
-                </span>
-              ))}
-            </div>
           </div>
           <div className="release-game-info">
-            <div className="release-game-title font-medium leading-tight line-clamp-2">{game.name}</div>
+            <div className="release-game-title font-medium leading-tight line-clamp-1">{game.name}</div>
             <div className="release-game-date opacity-80">{dateText}</div>
+            {isRawg || sourceBadges.length ? (
+              <div className="release-game-badges">
+                {isRawg ? (
+                  <span className="rounded bg-amber-200 text-amber-900 px-1 py-0 text-scale-9 font-medium">
+                    {t("calendar.notFromSteam")}
+                  </span>
+                ) : null}
+                {sourceBadges.map((s) => (
+                  <span
+                    key={s}
+                    className="rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9"
+                  >
+                    {s}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </a>
 
@@ -216,6 +218,9 @@ function GameModal({
       className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
+      }}
+      onKeyUp={(e) => {
+        if (e.key === "Escape") onClose();
       }}
     >
       <div className="max-w-md w-full rounded-lg overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 shadow-2xl">

@@ -47,7 +47,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 async function fetchJson(url: URL): Promise<unknown> {
-  const timeoutMs = numberFromEnv("STEAM_FETCH_TIMEOUT_MS", 10000);
+  const timeoutMs = numberFromEnv("STEAM_FETCH_TIMEOUT_MS", 15000);
   const response = await fetch(url, {
     cache: "no-store",
     signal: AbortSignal.timeout(timeoutMs),
@@ -210,7 +210,9 @@ async function main(): Promise<boolean> {
   const maxFetch = numberFromEnv("VERIFY_MAX_DETAIL_CANDIDATES", 25);
   const fetchCandidates = new Set<number>(candidates.slice(0, maxFetch));
   const candidateRank = new Map<number, number>();
-  candidates.forEach((appid, index) => candidateRank.set(appid, index + 1));
+  candidates.forEach((appid, index) => {
+    candidateRank.set(appid, index + 1);
+  });
 
   const ownedGame = owned.find((game) => game.appid === verifyAppid);
   const selected = candidates.includes(verifyAppid);

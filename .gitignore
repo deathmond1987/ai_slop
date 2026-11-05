@@ -49,3 +49,43 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local sessions / tokens
+/test-session-token.local
+/.test-session-token.local
+*.token.local
+*.session.local
+
+# local dev/test logs
+/dev.pid
+/dev.log
+/dev-server.log
+/dev-server*.log
+*.err
+
+# local debug/validation artifacts
+/calendar-*.json
+/calendar-*.err
+/debug-*.json
+/debug-*.err
+/insp*.json
+/shots/
+/shots-report.json
+/shots*.json
+/fonts-local.conf
+
+# temporary local scripts
+/scripts/*tmp*
+/scripts/debug-*
+/scripts/inspect*
+/scripts/shots.mjs
+
+# browser/playwright caches
+/browser-root/
+/browser-root/
+/.browser-root/
+/.fontconfig-cache/
+/.pkgs/
+/.pw-browsers/
+/playwright-report/
+/test-results/

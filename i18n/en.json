@@ -36,7 +36,7 @@
   "calendar.prev": "←",
   "calendar.next": "→",
   "calendar.export.ics": "Export .ics",
-  "calendar.knownYear.title": "Only the release year is known",
+  "calendar.knownYear.title": "Release date planned for {year} ({count})",
   "calendar.tbd.title": "Release date not announced",
   "calendar.tbd.empty": "No games with unknown release date.",
   "calendar.empty": "No upcoming releases.",

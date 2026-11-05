@@ -13,7 +13,7 @@ export function Header({
 }) {
   const t = tFor(lang);
   return (
-    <header className="app-shell flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 px-3 py-2">
+    <header className="app-shell flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-zinc-200 dark:border-zinc-800 px-3 py-2">
       <Link href="/" className="font-semibold tracking-tight text-base">
         {t("app.title")}
       </Link>
