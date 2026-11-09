@@ -9,7 +9,7 @@ export function CalendarFeedSkeleton({ view }: { view: CalendarView }) {
     <div className="flex flex-col gap-2" aria-hidden="true">
       <SkeletonBlock className="h-12 w-full" />
       <div className="calendar-feed-with-tbd min-w-0">
-        <div className="min-w-0 flex flex-col gap-2">
+        <div className="min-w-0 flex flex-col gap-[var(--calendar-feed-gap)]">
           {view === "grid" ? (
             <div className="grid grid-cols-[2rem_minmax(0,1fr)_2rem] items-center gap-1">
               <SkeletonBlock className="h-8 w-8 rounded-full" />

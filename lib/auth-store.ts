@@ -8,8 +8,16 @@ import {
 } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { deleteCacheByExactOrPrefix } from "./cache-store";
 import { logDebug, sanitizeDebugError } from "./debug";
+import { UPCOMING_CACHE_PREFIX } from "./aggregate-cache";
+import {
+  OWNED_CACHE_PREFIX,
+  STEAM_PROFILE_CACHE_PREFIX,
+} from "./steam-core";
+import { WISHLIST_CACHE_PREFIX } from "./wishlist-cache-core";
 import { getStatementRow, runStatement } from "./sqlite";
+import { normalizeSteamStoreCc } from "./store-cc";
 import type { Lang } from "./types";
 
 const SESSION_SECRET_KEY = "session_secret";
@@ -19,6 +27,7 @@ const CIPHER_SALT = "steam-calendar:settings:v1";
 
 let cachedSessionSecret: string | undefined;
 let cachedEncryptionKey: Buffer | undefined;
+let encryptionKeyCandidatesPromise: Promise<EncryptionKeyCandidate[]> | undefined;
 
 const GET_APP_SETTING_SQL = "SELECT value FROM app_settings WHERE key = ?";
 const UPSERT_APP_SETTING_SQL = `INSERT INTO app_settings (key, value, updated_at)
@@ -37,14 +46,14 @@ const INSERT_USER_SETTINGS_SQL = `INSERT INTO user_settings (steam_id, updated_a
  ON CONFLICT(steam_id) DO NOTHING`;
 
 const UPDATE_USER_SETTINGS_SQL = `UPDATE user_settings
- SET steam_api_key_cipher = ?, rawg_api_key_cipher = ?, updated_at = ?
+ SET steam_api_key_cipher = ?, rawg_api_key_cipher = ?, store_cc = ?, updated_at = ?
  WHERE steam_id = ?`;
 
 const GET_USER_SQL = `SELECT u.steam_id, u.display_name, u.avatar,
- us.steam_api_key_cipher, us.rawg_api_key_cipher, us.calendar_view, us.lang
-FROM users u
-LEFT JOIN user_settings us ON us.steam_id = u.steam_id
-WHERE u.steam_id = ?`;
+ us.steam_api_key_cipher, us.rawg_api_key_cipher, us.store_cc, us.calendar_view, us.lang
+ FROM users u
+ LEFT JOIN user_settings us ON us.steam_id = u.steam_id
+ WHERE u.steam_id = ?`;
 
 const INSERT_SESSION_SQL = `INSERT INTO sessions (token_hash, steam_id, expires_at, created_at, last_seen_at)
  VALUES (?, ?, ?, ?, ?)`;
@@ -73,6 +82,7 @@ export interface ProfileInput {
 export interface UserSettingsUpdate {
   steamApiKey?: string | null;
   rawgApiKey?: string | null;
+  storeCc?: string | null;
 }
 
 export interface UserPreferences {
@@ -86,6 +96,7 @@ interface UserRow {
   avatar?: string | null;
   steam_api_key_cipher?: string | null;
   rawg_api_key_cipher?: string | null;
+  store_cc?: string | null;
   calendar_view?: string | null;
   lang?: string | null;
 }
@@ -100,6 +111,11 @@ interface FeedCipherRow {
 
 interface SettingValueRow {
   value?: string;
+}
+
+interface EncryptionKeyCandidate {
+  source: string;
+  key: Buffer;
 }
 
 function hashToken(token: string): string {
@@ -185,6 +201,28 @@ function normalizeEncryptionKey(rawKey: string): Buffer {
   return scryptSync(rawKey, Buffer.from(CIPHER_SALT, "utf8"), 32);
 }
 
+function scryptEncryptionKeyFromSeed(rawSeed: string): Buffer {
+  return scryptSync(rawSeed, Buffer.from(CIPHER_SALT, "utf8"), 32);
+}
+
+function encryptionKeyCandidatesForSeed(rawSeed: string, source: string): EncryptionKeyCandidate[] {
+  const candidates: EncryptionKeyCandidate[] = [
+    { source: `${source}-scrypt`, key: scryptEncryptionKeyFromSeed(rawSeed) },
+  ];
+
+  if (/^[0-9a-fA-F]{64}$/.test(rawSeed)) {
+    candidates.push({ source: `${source}-hex`, key: normalizeEncryptionKey(rawSeed) });
+  }
+
+  return candidates;
+}
+
+function resetEncryptionKeyCaches(): void {
+  cachedSessionSecret = undefined;
+  cachedEncryptionKey = undefined;
+  encryptionKeyCandidatesPromise = undefined;
+}
+
 async function getEncryptionKey(): Promise<Buffer> {
   if (cachedEncryptionKey) return cachedEncryptionKey;
 
@@ -195,13 +233,71 @@ async function getEncryptionKey(): Promise<Buffer> {
     return cachedEncryptionKey;
   }
 
-  cachedEncryptionKey = scryptSync(
-    await getOrCreateSessionSecret(),
-    Buffer.from(CIPHER_SALT, "utf8"),
-    32
-  );
-  logDebug("authStore.encryptionKey.source", { source: "session-secret" });
+  cachedEncryptionKey = scryptEncryptionKeyFromSeed(await getOrCreateSessionSecret());
+  logDebug("authStore.encryptionKey.source", { source: "session-secret-scrypt" });
   return cachedEncryptionKey;
+}
+
+function dedupeEncryptionKeyCandidates(candidates: EncryptionKeyCandidate[]): EncryptionKeyCandidate[] {
+  const seen = new Set<string>();
+  const unique: EncryptionKeyCandidate[] = [];
+
+  for (const candidate of candidates) {
+    const id = candidate.key.toString("hex");
+    if (seen.has(id)) continue;
+    seen.add(id);
+    unique.push(candidate);
+  }
+
+  return unique;
+}
+
+async function getEncryptionKeyCandidates(): Promise<EncryptionKeyCandidate[]> {
+  if (encryptionKeyCandidatesPromise) return encryptionKeyCandidatesPromise;
+
+  encryptionKeyCandidatesPromise = (async () => {
+    const candidates: EncryptionKeyCandidate[] = [];
+    const envKey = process.env.DB_ENCRYPTION_KEY;
+
+    candidates.push({ source: "primary", key: await getEncryptionKey() });
+
+    if (envKey) {
+      candidates.push(...encryptionKeyCandidatesForSeed(envKey, "db-encryption-key-env"));
+    }
+
+    const dbSecret = await getAppSetting(SESSION_SECRET_KEY);
+    if (dbSecret) {
+      candidates.push(...encryptionKeyCandidatesForSeed(dbSecret, "session-secret-db"));
+    }
+
+    const envPassword = process.env.SESSION_PASSWORD;
+    if (envPassword) {
+      candidates.push(...encryptionKeyCandidatesForSeed(envPassword, "session-password-env"));
+    }
+
+    const localSecret = readLocalSecret();
+    if (localSecret) {
+      candidates.push(...encryptionKeyCandidatesForSeed(localSecret, "session-secret-local-file"));
+    }
+
+    return dedupeEncryptionKeyCandidates(candidates);
+  })();
+
+  return encryptionKeyCandidatesPromise;
+}
+
+async function decryptWithKey(
+  parts: string[],
+  iv: Buffer,
+  tag: Buffer,
+  encrypted: Buffer,
+  key: Buffer
+): Promise<string | undefined> {
+  if (iv.length !== 12 || tag.length !== 16) return undefined;
+
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
 }
 
 async function encryptString(value: string): Promise<string> {
@@ -224,23 +320,46 @@ async function decryptString(value?: string | null): Promise<string | undefined>
   const parts = value.split(".");
   if (parts.length !== 3) return undefined;
 
+  let iv: Buffer;
+  let tag: Buffer;
+  let encrypted: Buffer;
   try {
-    const key = await getEncryptionKey();
-    const iv = Buffer.from(parts[0], "base64url");
-    const tag = Buffer.from(parts[1], "base64url");
-    const encrypted = Buffer.from(parts[2], "base64url");
-    if (iv.length !== 12 || tag.length !== 16) return undefined;
-
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
+    iv = Buffer.from(parts[0], "base64url");
+    tag = Buffer.from(parts[1], "base64url");
+    encrypted = Buffer.from(parts[2], "base64url");
   } catch (error) {
-    logDebug("authStore.decryptString.failed", {
-      valueLength: value?.length ?? 0,
+    logDebug("authStore.decryptString.invalid_payload", {
+      valueLength: value.length,
       error: sanitizeDebugError(error),
     });
     return undefined;
   }
+
+  let attempts = 0;
+  const lastError = { error: "" };
+  for (const candidate of await getEncryptionKeyCandidates()) {
+    attempts++;
+    try {
+      const decrypted = await decryptWithKey(parts, iv, tag, encrypted, candidate.key);
+      if (decrypted !== undefined) {
+        logDebug("authStore.decryptString.success", {
+          source: candidate.source,
+          attempts,
+        });
+        return decrypted;
+      }
+    } catch (error) {
+      lastError.error = sanitizeDebugError(error);
+    }
+  }
+
+  resetEncryptionKeyCaches();
+  logDebug("authStore.decryptString.failed", {
+    valueLength: value.length,
+    attempts,
+    error: lastError.error || "unknown",
+  });
+  return undefined;
 }
 
 async function ensureUserRow(profile: ProfileInput): Promise<boolean> {
@@ -274,10 +393,19 @@ async function getUserRow(steamId: string): Promise<UserRow | undefined> {
 
 async function readDecryptedSettings(
   row: UserRow
-): Promise<{ apiKey?: string; rawgApiKey?: string }> {
+): Promise<{ apiKey?: string; rawgApiKey?: string; storeCc?: string }> {
   const apiKey = await decryptString(row.steam_api_key_cipher);
   const rawgApiKey = await decryptString(row.rawg_api_key_cipher);
-  return { apiKey, rawgApiKey };
+  return { apiKey, rawgApiKey, storeCc: normalizeSteamStoreCc(row.store_cc) };
+}
+
+async function invalidateUserSteamCaches(steamId: string): Promise<void> {
+  await Promise.all([
+    deleteCacheByExactOrPrefix(`${UPCOMING_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${OWNED_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${STEAM_PROFILE_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${WISHLIST_CACHE_PREFIX}${steamId}`),
+  ]);
 }
 
 export async function saveUserSettings(
@@ -285,26 +413,40 @@ export async function saveUserSettings(
   updates: UserSettingsUpdate
 ): Promise<boolean> {
   const currentRow = await getUserRow(steamId);
-  const currentSettings = currentRow ? await readDecryptedSettings(currentRow) : {};
-  let apiKey = currentSettings.apiKey;
-  let rawgApiKey = currentSettings.rawgApiKey;
 
-  if ("steamApiKey" in updates) apiKey = updates.steamApiKey ?? undefined;
-  if ("rawgApiKey" in updates) rawgApiKey = updates.rawgApiKey ?? undefined;
+  const steamApiKeyCipher =
+    "steamApiKey" in updates
+      ? updates.steamApiKey
+        ? await encryptString(updates.steamApiKey)
+        : null
+      : currentRow?.steam_api_key_cipher ?? null;
+
+  const rawgApiKeyCipher =
+    "rawgApiKey" in updates
+      ? updates.rawgApiKey
+        ? await encryptString(updates.rawgApiKey)
+        : null
+      : currentRow?.rawg_api_key_cipher ?? null;
+
+  const storeCc =
+    "storeCc" in updates
+      ? normalizeSteamStoreCc(updates.storeCc)
+      : normalizeSteamStoreCc(currentRow?.store_cc);
 
   const ok = await ensureUserSettingsRow(steamId);
   if (!ok) return false;
 
-  const steamApiKeyCipher = apiKey ? await encryptString(apiKey) : null;
-  const rawgApiKeyCipher = rawgApiKey ? await encryptString(rawgApiKey) : null;
-
-  return runStatement(
+  const saved = await runStatement(
     UPDATE_USER_SETTINGS_SQL,
     steamApiKeyCipher,
     rawgApiKeyCipher,
+    storeCc ?? null,
     Date.now(),
     steamId
   );
+
+  if (saved) await invalidateUserSteamCaches(steamId);
+  return saved;
 }
 
 export async function getUserPreferences(steamId: string): Promise<UserPreferences | undefined> {
@@ -372,7 +514,7 @@ export async function getSteamIdFromCalendarFeedToken(token: string): Promise<st
 
 export async function getSteamSessionData(
   steamId: string
-): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string } | undefined> {
+): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string; storeCc?: string } | undefined> {
   const row = await getUserRow(steamId);
   if (!row?.steam_id) return undefined;
 
@@ -383,6 +525,7 @@ export async function getSteamSessionData(
     avatar: row.avatar ?? undefined,
     apiKey: settings.apiKey,
     rawgApiKey: settings.rawgApiKey,
+    storeCc: settings.storeCc,
   };
 }
 
@@ -410,7 +553,7 @@ export async function createDbSession(
 
 export async function getSteamSessionDataFromToken(
   token: string
-): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string } | undefined> {
+): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string; storeCc?: string } | undefined> {
   const tokenHash = hashToken(token);
   const row = await getStatementRow<SessionTokenRow>(SELECT_SESSION_SQL, tokenHash, Date.now());
   if (!row?.steam_id) return undefined;

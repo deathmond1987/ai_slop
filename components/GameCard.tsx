@@ -1,18 +1,61 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
-import { tFor, formatDate, formatDateWithYear, formatPlaytime } from "@/lib/i18n-core";
+import { tFor, formatDateWithYear, formatPlaytime, formatTemplate } from "@/lib/i18n-core";
 import type { Lang, UpcomingGame } from "@/lib/types";
+
+function priceParts(game: UpcomingGame): {
+  priceText?: string;
+  initialPriceText?: string;
+  discount: number;
+} {
+  const price = game.price;
+  const discount = typeof price?.discount_percent === "number" ? price.discount_percent : 0;
+  const priceText = price?.final_formatted || price?.initial_formatted;
+  return {
+    priceText: priceText || undefined,
+    initialPriceText: discount > 0 ? price?.initial_formatted : undefined,
+    discount,
+  };
+}
+
+function PriceText({
+  game,
+  t,
+  className = "",
+}: {
+  game: UpcomingGame;
+  t: (key: string) => string;
+  className?: string;
+}) {
+  const { priceText, initialPriceText, discount } = priceParts(game);
+  if (!priceText || game.sources.includes("library")) return null;
+
+  return (
+    <span className={`flex flex-wrap items-baseline gap-1 ${className}`}>
+      {initialPriceText ? <span className="line-through opacity-60">{initialPriceText}</span> : null}
+      <span className={discount > 0 ? "font-medium" : undefined}>{priceText}</span>
+      {discount > 0 ? (
+        <span className="text-rose-700 dark:text-rose-400 font-medium">
+          {formatTemplate(t("calendar.discount"), { percent: discount })}
+        </span>
+      ) : null}
+    </span>
+  );
+}
 
 export function GameCard({
   game,
   lang,
   variant = "grid",
+  disableNestedModal = false,
 }: {
   game: UpcomingGame;
   lang: Lang;
   variant?: "grid" | "row" | "compact";
+  disableNestedModal?: boolean;
 }) {
   const t = tFor(lang);
   const [open, setOpen] = useState(false);
@@ -20,7 +63,7 @@ export function GameCard({
   const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || disableNestedModal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
@@ -31,14 +74,21 @@ export function GameCard({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, close]);
+  }, [open, disableNestedModal, close]);
 
   const isRawg = game.dateSource === "rawg";
-  const sourceBadges = game.sources.map((s) =>
-    s === "library" ? t("calendar.sourceLibrary") : t("calendar.sourceWishlist")
-  );
+  const sourceBadges = game.sources.map((s) => ({
+    key: s,
+    label: s === "library" ? t("calendar.sourceLibrary") : t("calendar.sourceWishlist"),
+    className:
+      s === "library"
+        ? "rounded bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 px-1 py-0 text-scale-9"
+        : "rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9",
+  }));
   const tooltip = `${game.name}${game.dateSourceUrl ? ` · ${game.dateSourceUrl}` : ""}`;
-  const modal = open ? <GameModal game={game} lang={lang} onClose={close} /> : null;
+  const modal = open && !disableNestedModal
+    ? createPortal(<GameModal game={game} lang={lang} onClose={close} />, document.body)
+    : null;
   const dateText = game.releaseDate
     ? formatDateWithYear(game.releaseDate, lang)
     : typeof game.releaseYear === "number"
@@ -53,7 +103,7 @@ export function GameCard({
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+            if (disableNestedModal || e.metaKey || e.ctrlKey || e.shiftKey) return;
             e.preventDefault();
             setOpen(true);
           }}
@@ -77,6 +127,7 @@ export function GameCard({
           <div className="release-game-info">
             <div className="release-game-title font-medium leading-tight line-clamp-1">{game.name}</div>
             <div className="release-game-date opacity-80">{dateText}</div>
+            <PriceText game={game} t={t} className="release-game-price justify-end" />
             {isRawg || sourceBadges.length ? (
               <div className="release-game-badges">
                 {isRawg ? (
@@ -84,12 +135,9 @@ export function GameCard({
                     {t("calendar.notFromSteam")}
                   </span>
                 ) : null}
-                {sourceBadges.map((s) => (
-                  <span
-                    key={s}
-                    className="rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9"
-                  >
-                    {s}
+                {sourceBadges.map((badge) => (
+                  <span key={badge.key} className={badge.className}>
+                    {badge.label}
                   </span>
                 ))}
               </div>
@@ -110,7 +158,7 @@ export function GameCard({
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => {
-            if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+            if (disableNestedModal || e.metaKey || e.ctrlKey || e.shiftKey) return;
             e.preventDefault();
             setOpen(true);
           }}
@@ -133,6 +181,7 @@ export function GameCard({
           )}
           <div className="compact-game-info">
             <div className="font-medium leading-tight line-clamp-2 min-w-0">{game.name}</div>
+            <PriceText game={game} t={t} className="compact-game-price text-scale-9" />
           </div>
         </a>
 
@@ -153,35 +202,34 @@ export function GameCard({
           setOpen(true);
         }}
         title={tooltip}
-          className="group block rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
+          className="calendar-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
           {game.headerImage ? (
-            <Image
-              src={game.headerImage}
-              alt={game.name}
-              width={460}
-              height={215}
-              className="w-full h-10 object-cover"
-              loading="lazy"
-              sizes="(max-width: 480px) 100vw, 180px"
-            />
+            <div className="calendar-game-media">
+              <Image
+                src={game.headerImage}
+                alt={game.name}
+                fill
+                loading="eager"
+                sizes="(max-width: 480px) 100vw, 220px"
+                style={{ objectFit: "cover" }}
+              />
+            </div>
           ) : (
-            <div className="w-full h-10 bg-zinc-200 dark:bg-zinc-800" />
+            <div className="calendar-game-media bg-zinc-200 dark:bg-zinc-800" />
           )}
-          <div className="px-1 py-0.5 flex flex-col gap-0.5 min-w-0">
-            <div className="font-medium leading-tight line-clamp-1">{game.name}</div>
-            <div className="flex gap-0.5 flex-wrap opacity-80">
+          <div className="calendar-game-info">
+            <div className="font-medium leading-tight line-clamp-1 min-w-0">{game.name}</div>
+            <PriceText game={game} t={t} className="calendar-game-price text-scale-9" />
+            <div className="calendar-game-badges">
               {isRawg && (
                 <span className="rounded bg-amber-200 text-amber-900 px-1 py-0 text-scale-9 font-medium">
                   {t("calendar.notFromSteam")}
                 </span>
               )}
-              {sourceBadges.map((s) => (
-                <span
-                  key={s}
-                  className="rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9"
-                >
-                  {s}
+              {sourceBadges.map((badge) => (
+                <span key={badge.key} className={badge.className}>
+                  {badge.label}
                 </span>
               ))}
             </div>
@@ -205,10 +253,23 @@ function GameModal({
   const t = tFor(lang);
   const isRawg = game.dateSource === "rawg";
   const dateText = game.releaseDate
-    ? formatDate(game.releaseDate, lang)
+    ? formatDateWithYear(game.releaseDate, lang)
     : typeof game.releaseYear === "number"
       ? String(game.releaseYear)
       : t("modal.dateUnknown");
+  const typeText = game.steamType === "game"
+    ? t("modal.typeGame")
+    : game.steamType === "dlc"
+      ? t("modal.typeDlc")
+      : game.steamType
+        ? formatTemplate(t("modal.typeOther"), { type: game.steamType })
+        : t("modal.typeUnknown");
+  const typeBadgeClass = game.steamType === "dlc"
+    ? "rounded bg-purple-200 text-purple-900 px-2 py-0.5 font-medium"
+    : game.steamType === "game"
+      ? "rounded bg-emerald-200 text-emerald-900 px-2 py-0.5 font-medium"
+      : "rounded bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5";
+  const fullgameName = game.fullgame?.name || `Steam App ${game.fullgame?.appid ?? ""}`;
 
   return (
     <div
@@ -223,7 +284,7 @@ function GameModal({
         if (e.key === "Escape") onClose();
       }}
     >
-      <div className="max-w-md w-full rounded-lg overflow-hidden bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 shadow-2xl">
+      <div className="max-w-md w-full max-h-[90vh] overflow-y-auto rounded-lg bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 shadow-2xl">
         {game.headerImage ? (
           <Image
             src={game.headerImage}
@@ -237,16 +298,11 @@ function GameModal({
           <div className="w-full h-24 bg-zinc-200 dark:bg-zinc-800" />
         )}
         <div className="p-4">
-          <div className="flex items-start justify-between gap-2">
+          <div>
             <h2 className="text-lg font-semibold leading-tight">{game.name}</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 text-xl leading-none px-2"
-              aria-label={t("modal.close")}
-            >
-              ×
-            </button>
+            <div className="mt-1 opacity-70 text-xs">
+              {t("modal.appid")}: {game.appid}
+            </div>
           </div>
 
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
@@ -279,11 +335,44 @@ function GameModal({
               </span>
             )}
             {game.sources.includes("library") && (
-              <span className="rounded bg-zinc-200 dark:bg-zinc-800 px-2 py-0.5">
+              <span className="rounded bg-emerald-200 text-emerald-900 dark:bg-emerald-950 dark:text-emerald-100 px-2 py-0.5">
                 {t("modal.inLibrary")}
               </span>
             )}
+            <span className={typeBadgeClass}>{typeText}</span>
+            {game.isFree && (
+              <span className="rounded bg-green-200 text-green-900 px-2 py-0.5 font-medium">
+                {t("modal.isFree")}
+              </span>
+            )}
           </div>
+
+          {game.price && !game.sources.includes("library") ? (
+            <div className="mt-2 text-sm">
+              <span className="opacity-70 text-xs">{t("modal.price")}: </span>
+              <PriceText game={game} t={t} />
+              {game.priceCc ? (
+                <span className="opacity-70 text-xs">
+                  {" · "}
+                  {formatTemplate(t("modal.priceRegion"), { region: game.priceCc.toUpperCase() })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {game.fullgame && (
+            <div className="mt-2 text-sm">
+              <span className="opacity-70 text-xs">{t("modal.fullGame")}: </span>
+              <a
+                href={`https://store.steampowered.com/app/${game.fullgame.appid}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:underline"
+              >
+                {fullgameName}
+              </a>
+            </div>
+          )}
 
           {game.genres?.length ? (
             <div className="mt-3 text-sm">
@@ -315,7 +404,7 @@ function GameModal({
             </div>
           ) : null}
 
-          {typeof game.playtimeForever === "number" && game.playtimeForever > 0 ? (
+          {typeof game.playtimeForever === "number" ? (
             <div className="mt-2 text-sm">
               <span className="opacity-70 text-xs">{t("modal.playtime")}: </span>
               <span>{formatPlaytime(game.playtimeForever, lang)}</span>

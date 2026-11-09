@@ -4,6 +4,7 @@ import {
   addOwnedCandidates,
   applyAppDetails,
   applyReleaseFilters,
+  buildUpcomingList,
   initializeCandidatesFromWishlist,
   MAX_DETAIL_CANDIDATES,
   needsAppDetails,
@@ -80,11 +81,165 @@ test("Steam year-only appdetails keep candidates as year-only after placeholder 
   assert.equal(game?.releaseDate, null);
 });
 
-test("appdetails DLC entries are removed from candidates", () => {
+test("library DLC entries without full-game references are kept", () => {
   const map = new Map<number, ScratchGame>();
-  map.set(123, scratch({ appid: 123, name: "Base Game" }));
+  map.set(123, scratch({ appid: 123, name: "Library DLC", sources: ["library"] }));
   applyAppDetails(map, 123, { type: "DLC", name: "DLC" });
+
+  const game = map.get(123);
+  assert.ok(game);
+  assert.equal(game.steamType, "dlc");
+
+  applyReleaseFilters(map, "2026-11-05");
+  removeUnknownLibraryOnly(map);
+  assert.equal(map.has(123), true);
+});
+
+test("library DLC entries with full-game references are kept", () => {
+  const map = new Map<number, ScratchGame>();
+  map.set(123, scratch({ appid: 123, name: "Library DLC", sources: ["library"] }));
+  applyAppDetails(map, 123, {
+    type: "DLC",
+    name: "DLC",
+    fullgame: { appid: "100", name: "Base Game" },
+  });
+
+  const game = map.get(123);
+  assert.ok(game);
+  assert.equal(game.steamType, "dlc");
+
+  applyReleaseFilters(map, "2026-11-05");
+  removeUnknownLibraryOnly(map);
+  assert.equal(map.has(123), true);
+});
+
+test("upcoming list keeps steam type, full-game reference and free flag", () => {
+  const map = new Map<number, ScratchGame>();
+  map.set(123, scratch({ appid: 123, name: "DLC", sources: ["library"] }));
+  map.set(456, scratch({ appid: 456, name: "Game", sources: ["wishlist"] }));
+
+  applyAppDetails(map, 123, {
+    type: "DLC",
+    name: "DLC",
+    is_free: false,
+    fullgame: { appid: "100", name: "Base Game" },
+  });
+  applyAppDetails(map, 456, {
+    type: "Game",
+    name: "Game",
+    is_free: true,
+  });
+
+  applyReleaseFilters(map, "2026-11-05");
+  removeUnknownLibraryOnly(map);
+
+  const list = buildUpcomingList(map);
+  assert.equal(list.length, 2);
+  assert.deepEqual(
+    list.map((game) => [game.appid, game.steamType, game.isFree, game.fullgame]),
+    [
+      [123, "dlc", false, { appid: 100, name: "Base Game" }],
+      [456, "game", true, undefined],
+    ]
+  );
+});
+
+test("non-dlc Steam types are removed from candidates", () => {
+  const map = new Map<number, ScratchGame>();
+  map.set(123, scratch({ appid: 123, name: "Microtransaction", sources: ["wishlist"] }));
+  applyAppDetails(map, 123, { type: "microtransaction", name: "Microtransaction" });
   assert.equal(map.size, 0);
+});
+
+test("wishlist DLC candidates with full-game references are kept", () => {
+  const result = initializeCandidatesFromWishlist({
+    items: [
+      {
+        appid: 4768180,
+        title: "Cronos: Lazarus",
+        releaseDateText: "3 Dec, 2026",
+        coverImage: "https://example.invalid/cover.jpg",
+      },
+    ],
+    private: false,
+    totalKnown: 1,
+    details: [],
+  });
+
+  applyAppDetails(result.map, 4768180, {
+    name: "Cronos: Lazarus",
+    type: "dlc",
+    fullgame: { appid: "2101960", name: "Cronos: The New Dawn" },
+    release_date: { date: "Dec 3, 2026", coming_soon: true },
+  });
+
+  const game = result.map.get(4768180);
+  assert.ok(game);
+  assert.equal(game.sources.includes("wishlist"), true);
+  assert.equal(game.releaseDate, "2026-12-03");
+  assert.equal(game.dateSource, "steam");
+
+  applyReleaseFilters(result.map, "2026-11-05");
+  assert.equal(result.map.has(4768180), true);
+});
+
+test("wishlist DLC candidates without full-game references are kept", () => {
+  const result = initializeCandidatesFromWishlist({
+    items: [
+      {
+        appid: 1234567,
+        title: "Standalone Wishlist DLC",
+        releaseDateText: "10 Dec, 2026",
+        coverImage: "https://example.invalid/dlc.jpg",
+      },
+    ],
+    private: false,
+    totalKnown: 1,
+    details: [],
+  });
+
+  applyAppDetails(result.map, 1234567, {
+    name: "Standalone Wishlist DLC",
+    type: "dlc",
+    release_date: { date: "Dec 10, 2026", coming_soon: true },
+  });
+
+  const game = result.map.get(1234567);
+  assert.ok(game);
+  assert.equal(game.name, "Standalone Wishlist DLC");
+  assert.equal(game.sources.includes("wishlist"), true);
+  assert.equal(game.releaseDate, "2026-12-10");
+  assert.equal(game.dateSource, "steam");
+
+  applyReleaseFilters(result.map, "2026-11-05");
+  assert.equal(result.map.has(1234567), true);
+});
+
+test("release filters keep Steam games releasing exactly today", () => {
+  const today = "2026-11-06";
+  const map = new Map<number, ScratchGame>();
+  map.set(
+    1,
+    scratch({
+      appid: 1,
+      name: "Releases today",
+      releaseDate: "2026-11-06",
+      dateSource: "steam",
+    })
+  );
+  map.set(
+    2,
+    scratch({
+      appid: 2,
+      name: "Released yesterday",
+      releaseDate: "2026-11-05",
+      dateSource: "steam",
+    })
+  );
+
+  applyReleaseFilters(map, today);
+  assert.equal(map.has(1), true);
+  assert.equal(map.has(2), false);
 });
 
 test("release filters remove old Steam year-only candidates only", () => {
@@ -272,4 +427,93 @@ test("future owned Warhammer candidate is selected and keeps future Steam date a
   assert.equal(game.releaseDate, "2026-12-03");
   assert.equal(game.dateSource, "steam");
   assert.equal(selectDetailCandidates(result, today).includes(2272360), false);
+});
+
+test("appdetails preserve price overview and normalized store region in candidates and upcoming games", () => {
+  const map = new Map<number, ScratchGame>();
+  map.set(123, scratch({ appid: 123 }));
+
+  applyAppDetails(map, 123, {
+    type: "Game",
+    release_date: { date: "Dec 3, 2026", coming_soon: true },
+    price_overview: {
+      currency: "eur",
+      initial: 3999,
+      final: 1999,
+      discount_percent: 50,
+      initial_formatted: "39,99 €",
+      final_formatted: "19,99 €",
+    },
+  }, "DE");
+
+  const game = map.get(123);
+  assert.ok(game);
+  assert.equal(game.price?.currency, "eur");
+  assert.equal(game.price?.initial_formatted, "39,99 €");
+  assert.equal(game.price?.final_formatted, "19,99 €");
+  assert.equal(game.priceCc, "de");
+
+  const list = buildUpcomingList(map);
+  assert.equal(list[0]?.price?.discount_percent, 50);
+  assert.equal(list[0]?.priceCc, "de");
+});
+
+test("regional storeCc reselects prefetched candidates without regional price_overview", () => {
+  const result = initializeCandidatesFromWishlist(
+    {
+      items: [{ appid: 1, title: "Known Steam game", releaseDateText: "May 28, 2027" }],
+      private: false,
+      totalKnown: 1,
+      details: [
+        {
+          appid: 1,
+          details: {
+            name: "Known Steam game",
+            type: "game",
+            header_image: "https://example.invalid/cover.jpg",
+            release_date: { date: "2027-05-28", coming_soon: true },
+          },
+        },
+      ],
+    },
+    "DE"
+  );
+
+  assert.equal(result.prefetchedAppDetails.has(1), true);
+  assert.equal(result.map.get(1)?.price, undefined);
+  assert.ok(selectDetailCandidates(result, "2026-11-03", "DE").includes(1));
+  assert.equal(selectDetailCandidates(result, "2026-11-03").includes(1), false);
+});
+
+test("regional storeCc does not reselect prefetched candidates that already have price_overview", () => {
+  const result = initializeCandidatesFromWishlist(
+    {
+      items: [{ appid: 1, title: "Known Steam game", releaseDateText: "May 28, 2027" }],
+      private: false,
+      totalKnown: 1,
+      details: [
+        {
+          appid: 1,
+          details: {
+            name: "Known Steam game",
+            type: "game",
+            header_image: "https://example.invalid/cover.jpg",
+            release_date: { date: "2027-05-28", coming_soon: true },
+            price_overview: {
+              currency: "eur",
+              initial: 3999,
+              final: 3999,
+              discount_percent: 0,
+              initial_formatted: "39,99 €",
+              final_formatted: "39,99 €",
+            },
+          },
+        },
+      ],
+    },
+    "DE"
+  );
+
+  assert.equal(result.map.get(1)?.priceCc, "de");
+  assert.equal(selectDetailCandidates(result, "2026-11-03", "DE").includes(1), false);
 });

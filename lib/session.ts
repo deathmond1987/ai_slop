@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { getIronSession } from "iron-session";
 import { logDebug, sanitizeDebugError } from "./debug";
 import { shouldUseSecureSessionCookie } from "./requestOrigin";
+import { normalizeSteamStoreCc } from "./store-cc";
 import type { IdentifiedSession, SteamSession } from "./types";
 import {
   createDbSession,
@@ -43,6 +44,7 @@ async function getLegacySteamSession(
       avatar: legacy.avatar,
       apiKey: legacy.apiKey,
       rawgApiKey: legacy.rawgApiKey,
+      storeCc: legacy.storeCc,
     };
   } catch (error) {
     logDebug("session.legacy.read_failed", {
@@ -79,6 +81,7 @@ export async function requireSteamSession(): Promise<IdentifiedSession | null> {
     avatar: session.avatar,
     apiKey: session.apiKey,
     rawgApiKey: session.rawgApiKey,
+    storeCc: session.storeCc,
   };
 }
 
@@ -99,6 +102,7 @@ export async function saveSteamSession(profile: SteamSession): Promise<void> {
     const updates: UserSettingsUpdate = {};
     if (profile.apiKey) updates.steamApiKey = profile.apiKey;
     if (profile.rawgApiKey) updates.rawgApiKey = profile.rawgApiKey;
+    if (profile.storeCc) updates.storeCc = profile.storeCc;
 
     if (Object.keys(updates).length > 0) {
       await saveUserSettings(profile.steamId, updates);
@@ -126,6 +130,7 @@ export async function saveSteamSession(profile: SteamSession): Promise<void> {
   if (profile.avatar !== undefined) legacy.avatar = profile.avatar;
   if (profile.apiKey !== undefined) legacy.apiKey = profile.apiKey;
   if (profile.rawgApiKey !== undefined) legacy.rawgApiKey = profile.rawgApiKey;
+  if (profile.storeCc !== undefined) legacy.storeCc = normalizeSteamStoreCc(profile.storeCc);
   await legacy.save();
 }
 
@@ -147,6 +152,7 @@ export async function updateSessionSettings(
 
     if ("steamApiKey" in updates) legacy.apiKey = updates.steamApiKey ?? undefined;
     if ("rawgApiKey" in updates) legacy.rawgApiKey = updates.rawgApiKey ?? undefined;
+    if ("storeCc" in updates) legacy.storeCc = normalizeSteamStoreCc(updates.storeCc);
 
     await legacy.save();
     return true;

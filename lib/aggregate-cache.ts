@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CacheGet, CacheSet } from "./cached-dedupe";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
 import type { IdentifiedSession } from "./types";
 
 export const UPCOMING_CACHE_PREFIX = "upcoming:v5:";
@@ -23,6 +24,7 @@ export interface UpcomingCacheContext {
   steamId: string;
   apiKey?: string | null;
   rawgApiKey?: string | null;
+  storeCc?: string | null;
   today: string;
 }
 
@@ -30,9 +32,14 @@ export interface LoadUpcomingWithCacheOptions<T> {
   context: UpcomingCacheContext;
   cacheGet: CacheGet;
   cacheSet: CacheSet;
-  factory: (cacheKey: string, apiKeyHash: string, rawgKeyHash: string) => Promise<T>;
+  factory: (
+    cacheKey: string,
+    apiKeyHash: string,
+    rawgKeyHash: string,
+    storeCcHash?: string
+  ) => Promise<T>;
   pending?: Map<string, Promise<T>>;
-  ttlMs?: number;
+  ttlMs?: number | ((value: T) => number);
 }
 
 export function shortHash(value?: string | null): string {
@@ -40,13 +47,20 @@ export function shortHash(value?: string | null): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 16);
 }
 
+export function upcomingStoreCcHash(storeCc?: string | null): string | undefined {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  return normalizedStoreCc ? shortHash(normalizedStoreCc) : undefined;
+}
+
 export function upcomingCacheKeyFromHashes(
   steamId: string,
   apiKeyHash: string,
   rawgKeyHash: string,
-  today: string
+  today: string,
+  storeCcHash?: string
 ): string {
-  return `${UPCOMING_CACHE_PREFIX}${steamId}:${apiKeyHash}:${rawgKeyHash}:${today}`;
+  const base = `${UPCOMING_CACHE_PREFIX}${steamId}:${apiKeyHash}:${rawgKeyHash}:${today}`;
+  return storeCcHash ? `${base}:${storeCcHash}` : base;
 }
 
 export function upcomingCacheKeyFromContext(context: UpcomingCacheContext): string {
@@ -54,12 +68,13 @@ export function upcomingCacheKeyFromContext(context: UpcomingCacheContext): stri
     context.steamId,
     shortHash(context.apiKey),
     shortHash(context.rawgApiKey),
-    context.today
+    context.today,
+    upcomingStoreCcHash(context.storeCc)
   );
 }
 
 export function upcomingCacheKey(
-  session: Pick<IdentifiedSession, "steamId" | "apiKey">,
+  session: Pick<IdentifiedSession, "steamId" | "apiKey" | "storeCc">,
   rawgKey: string | undefined,
   today: string
 ): string {
@@ -67,7 +82,8 @@ export function upcomingCacheKey(
     session.steamId,
     shortHash(session.apiKey),
     shortHash(rawgKey),
-    today
+    today,
+    upcomingStoreCcHash(session.storeCc)
   );
 }
 
@@ -81,20 +97,26 @@ export async function loadUpcomingWithCache<T>({
 }: LoadUpcomingWithCacheOptions<T>): Promise<T> {
   const apiKeyHash = shortHash(context.apiKey);
   const rawgKeyHash = shortHash(context.rawgApiKey);
+  const storeCcHash = upcomingStoreCcHash(context.storeCc);
   const cacheKey = upcomingCacheKeyFromHashes(
     context.steamId,
     apiKeyHash,
     rawgKeyHash,
-    context.today
+    context.today,
+    storeCcHash
   );
 
   const cached = await cacheGet<T>(cacheKey);
   if (cached !== undefined) return cached;
 
-  const ttl = ttlMs ?? upcomingCacheTtlMs();
+  const resolveTtl = (value: T): number => {
+    if (typeof ttlMs === "function") return ttlMs(value);
+    return ttlMs ?? upcomingCacheTtlMs();
+  };
+
   const run = async (): Promise<T> => {
-    const value = await factory(cacheKey, apiKeyHash, rawgKeyHash);
-    await cacheSet(cacheKey, value, ttl);
+    const value = await factory(cacheKey, apiKeyHash, rawgKeyHash, storeCcHash);
+    await cacheSet(cacheKey, value, resolveTtl(value));
     return value;
   };
 

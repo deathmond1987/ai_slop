@@ -17,7 +17,7 @@ import { CalendarGrid } from "./CalendarGrid";
 import { ReleaseDateList, type ReleaseMonthGroup } from "./ReleaseDateList";
 import { TBDSection } from "./TBDSection";
 import { YearOnlySection } from "./YearOnlySection";
-import { MonthSideNav } from "./MonthNav";
+import { MonthSideNav, MonthTodayLink } from "./MonthNav";
 import { ScrollableReleaseList } from "./ScrollableReleaseList";
 
 export async function CalendarFeed({
@@ -97,7 +97,7 @@ export async function CalendarFeed({
       )}
 
       <div className="calendar-feed-with-tbd min-w-0">
-        <div className="min-w-0 flex flex-col gap-2">
+        <div className="min-w-0 flex flex-col gap-[var(--calendar-feed-gap)]">
           {view === "grid" ? (
             <CalendarGrid
               lang={lang}
@@ -110,6 +110,7 @@ export async function CalendarFeed({
               nav={{
                 prev: <MonthSideNav lang={lang} year={year} month1={month1} direction="prev" query={query} />,
                 next: <MonthSideNav lang={lang} year={year} month1={month1} direction="next" query={query} />,
+                today: <MonthTodayLink lang={lang} year={year} month1={month1} query={query} />,
               }}
             />
           ) : (

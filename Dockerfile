@@ -1,10 +1,9 @@
-# syntax=docker/dockerfile:1
 FROM node:24-alpine AS deps
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN npm ci
 
 FROM node:24-alpine AS builder
 WORKDIR /app
@@ -14,7 +13,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 RUN mkdir -p public data
-RUN --mount=type=cache,target=/app/.next/cache npm run build
+RUN npm run build
 
 FROM node:24-alpine AS runner
 WORKDIR /app

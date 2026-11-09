@@ -2,17 +2,29 @@ import "server-only";
 import { cacheGet, cacheSet } from "./cache-store";
 import { logDebug, sanitizeDebugError, sanitizeDebugText } from "./debug";
 import { loadWithCacheAndDedupe } from "./cached-dedupe.ts";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
+import type { SteamPriceOverview } from "./types";
 import {
-  OWNED_TTL_MS,
   appDetailsCacheKey,
   appDetailsCacheTtl,
+  APP_DETAILS_TRANSIENT_MISS,
+  isTransientAppDetailsCache,
+  normalizeSteamProfileAvatar,
+  normalizeSteamProfileDisplayName,
   ownedCacheKey,
+  OWNED_TTL_MS,
+  parseSteamProfileHtml,
   steamAppDetailsConcurrency,
   steamAppDetailsFallbackEnabled,
   steamAppDetailsFallbackTimeoutMs,
   steamAppDetailsMinIntervalMs,
   steamAppDetailsTimeoutMs,
   steamFetchTimeoutMs,
+  steamProfileCacheKey,
+  steamProfileCacheTtl,
+  steamProfileTimeoutMs,
+  type AppDetailsTransientMiss,
+  type SteamProfile,
 } from "./steam-core.ts";
 
 const API = "https://api.steampowered.com";
@@ -23,6 +35,8 @@ export interface PlayerSummary {
   personaname: string;
   profileurl: string;
   avatarfull: string;
+  avatarmedium?: string;
+  avataricon?: string;
   communityvisibilitystate: number;
   personastate: number;
 }
@@ -44,12 +58,14 @@ export interface AppDetails {
   header_image?: string;
   genres?: { type: string; description: string }[];
   release_date?: { date: string; coming_soon: boolean };
+  fullgame?: { appid: string | number; name?: string };
+  price_overview?: SteamPriceOverview;
 }
 
 const pendingOwned = new Map<string, Promise<OwnedGame[]>>();
 export type AppDetailsPriority = "normal" | "low";
 
-const pendingAppDetails = new Map<string, Promise<AppDetails | null>>();
+const pendingAppDetails = new Map<string, Promise<AppDetails | null | AppDetailsTransientMiss>>();
 let nextAppDetailsRequestAtMs = 0;
 let activeAppDetailsFetches = 0;
 let activeLowAppDetailsFetches = 0;
@@ -113,6 +129,113 @@ export async function getPlayerSummaries(steamIds: string[], key?: string): Prom
   return data?.response?.players ?? [];
 }
 
+const pendingProfile = new Map<string, Promise<SteamProfile>>();
+
+export async function getSteamProfile(steamId: string, key?: string): Promise<SteamProfile> {
+  return loadWithCacheAndDedupe({
+    cacheKey: steamProfileCacheKey(steamId),
+    pending: pendingProfile,
+    cacheGet,
+    cacheSet,
+    factory: () => fetchSteamProfile(steamId, key),
+    ttlMs: steamProfileCacheTtl,
+  });
+}
+
+async function fetchSteamProfile(steamId: string, key?: string): Promise<SteamProfile> {
+  if (key) {
+    try {
+      const summaries = await getPlayerSummaries([steamId], key);
+      const summary = summaries[0];
+      const profile: SteamProfile = {
+        displayName: normalizeSteamProfileDisplayName(summary?.personaname),
+        avatar: normalizeSteamProfileAvatar(summary?.avatarfull ?? summary?.avatarmedium ?? summary?.avataricon),
+      };
+
+      if (profile.displayName || profile.avatar) {
+        logDebug("steam.profile.api_loaded", {
+          hasSteamId: true,
+          hasKey: true,
+          hasAvatar: Boolean(profile.avatar),
+          hasDisplayName: Boolean(profile.displayName),
+        });
+        return profile;
+      }
+
+      logDebug("steam.profile.api_empty", {
+        hasSteamId: true,
+        hasKey: true,
+        playerCount: summaries.length,
+      });
+    } catch (error) {
+      logDebug("steam.profile.api_failed", {
+        hasSteamId: true,
+        hasKey: true,
+        error: sanitizeDebugError(error),
+      });
+    }
+  }
+
+  try {
+    const html = await fetchSteamProfileHtml(steamId);
+    const profile = parseSteamProfileHtml(html);
+    if (profile.displayName || profile.avatar) {
+      logDebug("steam.profile.html_loaded", {
+        hasSteamId: true,
+        hasKey: Boolean(key),
+        hasAvatar: Boolean(profile.avatar),
+        hasDisplayName: Boolean(profile.displayName),
+      });
+      return profile;
+    }
+
+    logDebug("steam.profile.html_empty", {
+      hasSteamId: true,
+      hasKey: Boolean(key),
+      htmlLength: html.length,
+    });
+  } catch (error) {
+    logDebug("steam.profile.html_failed", {
+      hasSteamId: true,
+      hasKey: Boolean(key),
+      error: sanitizeDebugError(error),
+    });
+  }
+
+  return {};
+}
+
+async function fetchSteamProfileHtml(steamId: string): Promise<string> {
+  if (!/^\d{15,20}$/.test(steamId)) throw new Error("Invalid SteamID64");
+
+  const url = `https://steamcommunity.com/profiles/${encodeURIComponent(steamId)}`;
+  let status: number | undefined;
+  try {
+    const res = await fetch(url, {
+      cache: "no-store",
+      redirect: "follow",
+      signal: AbortSignal.timeout(steamProfileTimeoutMs()),
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en",
+      },
+    });
+    status = res.status;
+    if (!res.ok) throw new Error(`Steam profile ${status}: ${sanitizeDebugText(url)}`);
+    return await res.text();
+  } catch (error) {
+    const safeMessage = sanitizeDebugError(error);
+    logDebug("steam.htmlFetch.failed", {
+      status,
+      url: sanitizeDebugText(url),
+      error: safeMessage,
+    });
+    throw new Error(safeMessage);
+  }
+}
+
 export async function getOwnedGames(
   steamId: string,
   key: string,
@@ -160,6 +283,10 @@ async function fetchOwnedGames(steamId: string, key: string): Promise<OwnedGame[
   return out;
 }
 
+function isTransientAppDetailsFetchError(error: unknown): boolean {
+  return /timeout|aborted|fetch failed|network|\b(?:429|500|502|503|504)\b/i.test(sanitizeDebugError(error));
+}
+
 async function reserveAppDetailsRequestSlot(appid: number): Promise<void> {
   const minIntervalMs = steamAppDetailsMinIntervalMs();
   if (minIntervalMs <= 0) return;
@@ -175,22 +302,34 @@ async function reserveAppDetailsRequestSlot(appid: number): Promise<void> {
   }
 }
 
-async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "normal"): Promise<AppDetails | null> {
+async function fetchAppDetails(
+  appid: number,
+  priority: AppDetailsPriority = "normal",
+  storeCc?: string | null
+): Promise<AppDetails | null | AppDetailsTransientMiss> {
   const startedAt = Date.now();
-  const finish = (details: AppDetails | null): AppDetails | null => {
+  let sawTransientFetchFailure = false;
+  let sawConfirmedNegative = false;
+  const finish = (
+    details: AppDetails | null | AppDetailsTransientMiss
+  ): AppDetails | null | AppDetailsTransientMiss => {
+    const transient = isTransientAppDetailsCache(details);
     logDebug("steam.appdetails.finished", {
       appid,
       ms: Date.now() - startedAt,
-      ok: details !== null,
+      ok: details !== null && !transient,
+      transient,
     });
     return details;
   };
 
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
   const params = new URLSearchParams({
     appids: String(appid),
-    filters: "basic,release_date",
+    filters: "basic,release_date,price_overview",
     l: "en",
   });
+  if (normalizedStoreCc) params.set("cc", normalizedStoreCc);
   const primaryUrl = `${STORE}/api/appdetails?${params}`;
   let primaryErrorText = "";
 
@@ -204,34 +343,42 @@ async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "no
       )) as Record<string, { success?: boolean; data?: AppDetails }>;
       const entry = data?.[String(appid)];
       if (entry?.success && entry.data) return finish(entry.data);
+      sawConfirmedNegative = true;
       logDebug("steam.appdetails.unsuccessful", { appid, success: entry?.success === true });
     } finally {
       release();
     }
   } catch (error) {
     primaryErrorText = sanitizeDebugError(error);
+    sawTransientFetchFailure = isTransientAppDetailsFetchError(error);
     logDebug("steam.appdetails.primary_failed", {
       appid,
       error: primaryErrorText,
     });
   }
 
-  if (!steamAppDetailsFallbackEnabled()) return finish(null);
+  if (!steamAppDetailsFallbackEnabled()) {
+    return finish(sawTransientFetchFailure && !sawConfirmedNegative ? APP_DETAILS_TRANSIENT_MISS : null);
+  }
 
   const fallbackTimeoutMs = steamAppDetailsFallbackTimeoutMs();
-  const ccParams = new URLSearchParams(params);
-  ccParams.set("cc", "us");
-  const ccUrl = `${STORE}/api/appdetails?${ccParams}`;
   const preferPrimaryRetry = /timeout|aborted|fetch failed|network/i.test(primaryErrorText);
-  const fallbackAttempts = preferPrimaryRetry
-    ? [
-        { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
-        { url: ccUrl, timeoutMs: fallbackTimeoutMs },
-      ]
-    : [
-        { url: ccUrl, timeoutMs: fallbackTimeoutMs },
-        { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
-      ];
+  const fallbackAttempts = normalizedStoreCc
+    ? [{ url: primaryUrl, timeoutMs: fallbackTimeoutMs }]
+    : (() => {
+        const ccParams = new URLSearchParams(params);
+        ccParams.set("cc", "us");
+        const ccUrl = `${STORE}/api/appdetails?${ccParams}`;
+        return preferPrimaryRetry
+          ? [
+              { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
+              { url: ccUrl, timeoutMs: fallbackTimeoutMs },
+            ]
+          : [
+              { url: ccUrl, timeoutMs: fallbackTimeoutMs },
+              { url: primaryUrl, timeoutMs: fallbackTimeoutMs },
+            ];
+      })();
 
   for (const attempt of fallbackAttempts) {
     try {
@@ -244,6 +391,7 @@ async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "no
         )) as Record<string, { success?: boolean; data?: AppDetails }>;
         const fallbackEntry = fallbackData?.[String(appid)];
         if (fallbackEntry?.success && fallbackEntry.data) return finish(fallbackEntry.data);
+        sawConfirmedNegative = true;
         logDebug("steam.appdetails.fallback_unsuccessful", {
           appid,
           success: fallbackEntry?.success === true,
@@ -252,6 +400,7 @@ async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "no
         release();
       }
     } catch (fallbackError) {
+      sawTransientFetchFailure = sawTransientFetchFailure || isTransientAppDetailsFetchError(fallbackError);
       logDebug("steam.appdetails.fallback_failed", {
         appid,
         error: sanitizeDebugError(fallbackError),
@@ -259,23 +408,35 @@ async function fetchAppDetails(appid: number, priority: AppDetailsPriority = "no
     }
   }
 
-  return finish(null);
+  return finish(sawTransientFetchFailure && !sawConfirmedNegative ? APP_DETAILS_TRANSIENT_MISS : null);
 }
 
-async function loadAppDetails(appid: number, priority: AppDetailsPriority = "normal"): Promise<AppDetails | null> {
-  return loadWithCacheAndDedupe({
-    cacheKey: appDetailsCacheKey(appid),
+async function loadAppDetails(
+  appid: number,
+  priority: AppDetailsPriority = "normal",
+  storeCc?: string | null
+): Promise<AppDetails | null> {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  const details = await loadWithCacheAndDedupe({
+    cacheKey: appDetailsCacheKey(appid, normalizedStoreCc),
     pending: pendingAppDetails,
-    factory: () => fetchAppDetails(appid, priority),
+    factory: () => fetchAppDetails(appid, priority, normalizedStoreCc),
     ttlMs: appDetailsCacheTtl,
     cacheGet,
     cacheSet,
   });
+
+  return isTransientAppDetailsCache(details) ? null : details;
 }
 
 export async function getAppDetails(
   appids: number[],
-  options: { concurrency?: number; limit?: number; priority?: AppDetailsPriority } = {}
+  options: {
+    concurrency?: number;
+    limit?: number;
+    priority?: AppDetailsPriority;
+    storeCc?: string | null;
+  } = {}
 ): Promise<Map<number, AppDetails | null>> {
   const out = new Map<number, AppDetails | null>();
   const ids = Array.from(new Set(appids.filter((id) => Number.isFinite(id))));
@@ -283,6 +444,7 @@ export async function getAppDetails(
   const targets = ids.slice(0, Math.max(0, limit));
   const concurrency = Math.max(1, Math.min(options.concurrency ?? steamAppDetailsConcurrency(), 10));
   const priority = options.priority ?? "normal";
+  const normalizedStoreCc = normalizeSteamStoreCc(options.storeCc);
   let cursor = 0;
 
   logDebug("steam.getAppDetails.start", {
@@ -290,12 +452,13 @@ export async function getAppDetails(
     requested: targets.length,
     concurrency,
     priority,
+    hasStoreCc: Boolean(normalizedStoreCc),
   });
 
   async function worker(): Promise<void> {
     while (cursor < targets.length) {
       const id = targets[cursor++];
-      const cached = await loadAppDetails(id, priority);
+      const cached = await loadAppDetails(id, priority, normalizedStoreCc);
       out.set(id, cached);
     }
   }

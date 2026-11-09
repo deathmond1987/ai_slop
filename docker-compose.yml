@@ -16,10 +16,13 @@ services:
       RAWG_API_KEY: "${RAWG_API_KEY:-}"
       STEAM_API_KEY: "${STEAM_API_KEY:-}"
     volumes:
-      - ./data:/app/data
+      - app_data:/app/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 5
       start_period: 30s
+
+volumes:
+  app_data:

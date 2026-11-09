@@ -1,5 +1,11 @@
 import "server-only";
 import { getAppDetails } from "./steam";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
+import {
+  WISHLIST_CACHE_TTL_MS,
+  wishlistCacheKey,
+  wishlistStoreCcHash,
+} from "./wishlist-cache-core.ts";
 import { cacheGet, cacheSet } from "./cache-store";
 import { logDebug, sanitizeDebugError } from "./debug";
 import type { AppDetails } from "./steam";
@@ -12,8 +18,20 @@ import {
   parseJsonWishlistResponse,
   parseWishlistPageResult,
   shouldFetchWishlistPage,
+  buildWishlistFinalizedItems,
+  isCacheableWishlistResult,
+  needsWishlistAppDetails,
+  wishlistApiAppidMap,
+  wishlistFinalizeAppids,
+  wishlistPageItemMap,
+  wishlistResultStatus,
 } from "./wishlist-core";
-import type { ApiWishlistItem, ApiWishlistResult, WishlistItem } from "./wishlist-core";
+import type {
+  ApiWishlistItem,
+  ApiWishlistResult,
+  WishlistItem,
+  WishlistResultStatus,
+} from "./wishlist-core";
 
 export type { ApiWishlistItem, ApiWishlistResult, WishlistItem } from "./wishlist-core";
 
@@ -27,6 +45,11 @@ export interface WishlistResult {
   private: boolean;
   totalKnown?: number;
   details?: WishlistAppDetailsEntry[];
+  status?: WishlistResultStatus;
+}
+
+function withWishlistStatus(result: WishlistResult): WishlistResult {
+  return { ...result, status: result.status ?? wishlistResultStatus(result) };
 }
 
 const UA =
@@ -165,90 +188,87 @@ async function fetchWishlistApi(steamId: string): Promise<ApiWishlistResult> {
 async function finalizeApiWishlist(
   apiItems: ApiWishlistItem[],
   totalCount: number,
-  pageItems: WishlistItem[]
+  pageItems: WishlistItem[],
+  storeCc?: string | null
 ): Promise<WishlistResult> {
-  const pageMap = new Map<number, WishlistItem>(pageItems.map((item) => [item.appid, item]));
-  const enrichAppids = apiItems
-    .map((item) => item.appid)
-    .filter((appid) => {
-      const pageItem = pageMap.get(appid);
-      const placeholder = `App ${appid}`;
-      if (!pageItem || pageItem.title === placeholder) return true;
-      if (!pageItem.coverImage) return true;
-      return !pageItem.releaseDateText;
-    });
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  const apiMap = wishlistApiAppidMap(apiItems);
+  const pageMap = wishlistPageItemMap(pageItems);
+  const sourceAppids = wishlistFinalizeAppids(apiMap, pageMap);
+  const enrichAppids = sourceAppids.filter((appid) =>
+    needsWishlistAppDetails(appid, apiMap.size > 0, pageMap.get(appid))
+  );
   const details =
     enrichAppids.length > 0
       ? await getAppDetails(enrichAppids, {
           limit: Math.min(enrichAppids.length, MAX_EXTRA_WISHLIST_METADATA),
+          storeCc: normalizedStoreCc,
         })
       : new Map<number, AppDetails | null>();
 
-  const items = apiItems.map((item) => {
-    const pageItem = pageMap.get(item.appid);
-    const detail = details.get(item.appid);
-    const fallbackTitle = `App ${item.appid}`;
-    const title =
-      pageItem && pageItem.title && pageItem.title !== fallbackTitle
-        ? pageItem.title
-        : detail?.name || fallbackTitle;
-    return {
-      appid: item.appid,
-      title,
-      coverImage: pageItem?.coverImage || detail?.header_image,
-      releaseDateText: pageItem?.releaseDateText || detail?.release_date?.date,
-    };
-  });
+  const items = buildWishlistFinalizedItems(sourceAppids, pageMap, details);
 
   const detailsEntries: WishlistAppDetailsEntry[] = [];
   for (const [appid, detail] of details) {
     detailsEntries.push({ appid, details: detail });
   }
 
-  return {
+  return withWishlistStatus({
     items,
     private: false,
     totalKnown: Math.max(totalCount, items.length) || undefined,
     details: detailsEntries.length > 0 ? detailsEntries : undefined,
-  };
+  });
 }
 
-const WISHLIST_CACHE_TTL_MS = 10 * 60 * 1000;
-const WISHLIST_CACHE_PREFIX = "wishlist:v2:";
 const pendingWishlist = new Map<string, Promise<WishlistResult>>();
 
-function getCachedWishlist(steamId: string): Promise<WishlistResult | undefined> {
-  return cacheGet<WishlistResult>(`${WISHLIST_CACHE_PREFIX}${steamId}`);
+function getCachedWishlist(steamId: string, storeCcHash?: string): Promise<WishlistResult | undefined> {
+  return cacheGet<WishlistResult>(wishlistCacheKey(steamId, storeCcHash));
 }
 
-function setCachedWishlist(steamId: string, result: WishlistResult): Promise<void> {
-  return cacheSet(`${WISHLIST_CACHE_PREFIX}${steamId}`, result, WISHLIST_CACHE_TTL_MS);
+function setCachedWishlist(
+  steamId: string,
+  storeCcHash: string | undefined,
+  result: WishlistResult
+): Promise<void> {
+  return cacheSet(wishlistCacheKey(steamId, storeCcHash), result, WISHLIST_CACHE_TTL_MS);
 }
 
-export async function fetchWishlist(steamId: string): Promise<WishlistResult> {
-  const cached = await getCachedWishlist(steamId);
-  if (cached !== undefined) return cached;
+export async function fetchWishlist(steamId: string, storeCc?: string | null): Promise<WishlistResult> {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  const storeCcHash = wishlistStoreCcHash(storeCc);
+  const pendingKey = wishlistCacheKey(steamId, storeCcHash);
+  const cached = await getCachedWishlist(steamId, storeCcHash);
+  if (cached !== undefined && isCacheableWishlistResult(cached)) return cached;
 
-  const inflight = pendingWishlist.get(steamId);
+  const inflight = pendingWishlist.get(pendingKey);
   if (inflight) return inflight;
 
   const uncachedStart = Date.now();
-  const promise = fetchWishlistUncached(steamId).finally(() => {
-    pendingWishlist.delete(steamId);
+  const promise = fetchWishlistUncached(steamId, normalizedStoreCc).finally(() => {
+    pendingWishlist.delete(pendingKey);
   });
-  pendingWishlist.set(steamId, promise);
-  const result = await promise;
+  pendingWishlist.set(pendingKey, promise);
+  const result = withWishlistStatus(await promise);
   logDebug("wishlist.total", {
     ms: Date.now() - uncachedStart,
     items: result.items.length,
     private: result.private,
     totalKnown: result.totalKnown ?? null,
+    status: result.status ?? null,
+    hasStoreCc: Boolean(normalizedStoreCc),
   });
-  await setCachedWishlist(steamId, result);
+  if (isCacheableWishlistResult(result)) {
+    await setCachedWishlist(steamId, storeCcHash, result);
+  }
   return result;
 }
 
-async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
+async function fetchWishlistUncached(
+  steamId: string,
+  storeCc?: string | null
+): Promise<WishlistResult> {
   const emptyPage: WishlistResult = {
     items: [],
     private: false,
@@ -270,6 +290,7 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
       items: [],
       private: true,
       totalKnown: api.count ?? undefined,
+      status: "private",
     };
   }
 
@@ -287,7 +308,12 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
       totalKnown: page.totalKnown ?? null,
     });
     const finalizeStart = Date.now();
-    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, page.items);
+    const result = await finalizeApiWishlist(
+      api.items,
+      api.count ?? api.items.length,
+      page.items,
+      storeCc
+    );
     logDebug("wishlist.phase.finalize", {
       ms: Date.now() - finalizeStart,
       items: result.items.length,
@@ -306,7 +332,7 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
       totalKnown: api.count ?? null,
     });
     const finalizeStart = Date.now();
-    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, []);
+    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, [], storeCc);
     logDebug("wishlist.phase.finalize", {
       ms: Date.now() - finalizeStart,
       items: result.items.length,
@@ -318,7 +344,7 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
   }
 
   if (api.ok && (api.count ?? 0) === 0) {
-    return { items: [], private: false, totalKnown: 0 };
+    return { items: [], private: false, totalKnown: 0, status: "empty" };
   }
 
   const pageStart = Date.now();
@@ -335,19 +361,19 @@ async function fetchWishlistUncached(steamId: string): Promise<WishlistResult> {
     });
 
   if (page.private) {
-    return { items: [], private: true, totalKnown: page.totalKnown };
+    return { items: [], private: true, totalKnown: page.totalKnown, status: "private" };
   }
 
   if (page.items.length === 0 && api.ok && (api.count ?? 0) === 0) {
-    return { items: [], private: false, totalKnown: 0 };
+    return { items: [], private: false, totalKnown: 0, status: "empty" };
   }
 
   const totalKnown = Math.max(page.totalKnown ?? 0, api.count ?? 0, page.items.length);
-  return {
+  return withWishlistStatus({
     items: page.items,
     private: page.private,
     totalKnown: totalKnown || undefined,
-  };
+  });
 }
 
 async function fetchWishlistFromPage(steamId: string): Promise<WishlistResult> {

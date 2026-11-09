@@ -9,6 +9,7 @@ import { logDebug } from "@/lib/debug";
 import { getExternalOriginFromHeaders } from "@/lib/requestOrigin";
 import { getT } from "@/lib/i18n";
 import { requireSteamSession } from "@/lib/session";
+import { formatSteamStoreCc } from "@/lib/store-cc";
 import { saveSettings } from "@/app/actions/settings";
 
 function isSaved(raw: string | string[] | undefined): boolean {
@@ -46,7 +47,7 @@ export default async function SettingsPage({
   });
 
   return (
-    <section className="app-shell mt-4 flex flex-col gap-6">
+    <section className="settings-page app-shell mt-4 flex flex-col gap-6">
       <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
 
       {saved && (
@@ -118,6 +119,38 @@ export default async function SettingsPage({
               className="self-start text-sm text-red-600 hover:underline"
             >
               {t("settings.apiKey.remove")}
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <label className="font-medium">{t("settings.storeCc.label")}</label>
+            <span className="text-xs rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1">
+              {session.storeCc
+                ? `${t("settings.status.saved")}: ${formatSteamStoreCc(session.storeCc)}`
+                : t("settings.status.notSet")}
+            </span>
+          </div>
+          <p className="text-sm opacity-70">{t("settings.storeCc.help")}</p>
+          <input
+            name="storeCc"
+            type="text"
+            inputMode="text"
+            pattern="[a-zA-Z]{0,2}"
+            maxLength={2}
+            defaultValue={session.storeCc ?? ""}
+            placeholder={t("settings.storeCc.placeholder")}
+            className="w-28 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 uppercase"
+          />
+          {session.storeCc && (
+            <button
+              type="submit"
+              name="remove"
+              value="store"
+              className="self-start text-sm text-red-600 hover:underline"
+            >
+              {t("settings.storeCc.remove")}
             </button>
           )}
         </div>

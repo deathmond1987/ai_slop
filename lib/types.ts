@@ -4,6 +4,20 @@ export type GameSource = "library" | "wishlist";
 
 export type DateSource = "steam" | "steamYear" | "rawg" | "unknown";
 
+export interface SteamFullGameRef {
+  appid: number;
+  name?: string;
+}
+
+export interface SteamPriceOverview {
+  currency: string;
+  initial?: number;
+  final?: number;
+  discount_percent?: number;
+  initial_formatted?: string;
+  final_formatted?: string;
+}
+
 export interface UpcomingGame {
   appid: number;
   name: string;
@@ -14,10 +28,15 @@ export interface UpcomingGame {
   dateSource: DateSource;
   dateSourceUrl?: string;
   steamUrl: string;
+  steamType?: string;
+  isFree?: boolean;
+  fullgame?: SteamFullGameRef;
   genres?: string[];
   playtimeForever?: number;
   developer?: string;
   publisher?: string;
+  price?: SteamPriceOverview;
+  priceCc?: string;
 }
 
 export interface SteamSession {
@@ -26,6 +45,7 @@ export interface SteamSession {
   avatar?: string;
   apiKey?: string;
   rawgApiKey?: string;
+  storeCc?: string;
 }
 
 export type IdentifiedSession = SteamSession & { steamId: string };

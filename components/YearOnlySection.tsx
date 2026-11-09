@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { formatTemplate, tFor } from "@/lib/i18n";
 import type { Lang, UpcomingGame } from "@/lib/types";
 import { FitBlock } from "./FitBlock";
@@ -16,9 +17,12 @@ export function YearOnlySection({
   if (!games.length) return null;
 
   const rows = Math.ceil(games.length / 4);
+  const yearOnlyStyle = {
+    "--calendar-year-block-min": `calc(${rows} * var(--compact-card-height) + var(--calendar-year-block-title-min))`,
+  } as CSSProperties;
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
+    <div className="calendar-year-only flex min-w-0 flex-col gap-1" style={yearOnlyStyle}>
       <h2 className="text-scale-11 leading-tight font-semibold truncate">
         {formatTemplate(t("calendar.knownYear.title"), { year, count: games.length })}
       </h2>

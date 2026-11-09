@@ -7,6 +7,7 @@ export interface SteamDateInfo {
 
 export interface ReleaseDateGame extends Pick<UpcomingGame, "releaseDate" | "releaseYear" | "dateSource"> {
   wishlistDateText?: string;
+  steamType?: string;
 }
 
 export interface SourcedReleaseDateGame extends ReleaseDateGame {
@@ -142,7 +143,7 @@ export function hasKnownSteamDate(game: ReleaseDateGame): boolean {
 }
 
 export function hasKnownReleasedSteamDate(game: ReleaseDateGame, today: string): boolean {
-  return hasKnownSteamDate(game) && game.releaseDate !== null && game.releaseDate <= today;
+  return hasKnownSteamDate(game) && game.releaseDate !== null && game.releaseDate < today;
 }
 
 export function applySteamDateInfo(
@@ -185,7 +186,7 @@ export function applyKnownWishlistDatesAfterDetails(games: Iterable<ReleaseDateG
 }
 
 export function shouldRemoveKnownReleasedSteamGame(game: ReleaseDateGame, today: string): boolean {
-  return game.releaseDate !== null && game.releaseDate <= today && game.dateSource === "steam";
+  return game.releaseDate !== null && game.releaseDate < today && game.dateSource === "steam";
 }
 
 export function shouldRemovePastYearOnlySteamGame(
@@ -201,6 +202,8 @@ export function shouldRemovePastYearOnlySteamGame(
 }
 
 export function shouldRemoveUnknownLibraryOnly(game: SourcedReleaseDateGame): boolean {
+  if (game.steamType === "dlc") return false;
+
   return (
     !game.releaseDate &&
     game.sources.includes("library") &&

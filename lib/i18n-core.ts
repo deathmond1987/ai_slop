@@ -90,3 +90,6 @@ export function formatDateWithYear(iso: string, lang: Lang): string {
 export function formatTemplate(template: string, values: Record<string, string | number>): string {
   return template.replace(/\{(\w+)\}/g, (_, key) => String(values[key] ?? ""));
 }
+
+export { formatMoney } from "./money.ts";
+

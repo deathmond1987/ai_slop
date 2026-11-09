@@ -1,17 +1,36 @@
+import Image from "next/image";
 import Link from "next/link";
 import { tFor } from "@/lib/i18n";
 import type { Lang } from "@/lib/types";
+import type { WishlistTotalResponse } from "@/lib/wishlist-total";
+import { WishlistPriceCounter } from "./WishlistPriceCounter";
 
 export function Header({
   lang,
   signedIn,
   displayName,
+  avatar,
+  storeCc,
+  initialTotal,
 }: {
   lang: Lang;
   signedIn: boolean;
   displayName?: string;
+  avatar?: string;
+  storeCc?: string;
+  initialTotal?: WishlistTotalResponse;
 }) {
   const t = tFor(lang);
+  const counterKey = [
+    signedIn ? "in" : "out",
+    storeCc ?? "",
+    initialTotal?.ready ?? false,
+    initialTotal?.totalCents ?? "",
+    initialTotal?.currency ?? "",
+    initialTotal?.discountTotalCents ?? "",
+    initialTotal?.discounts?.length ?? 0,
+    initialTotal?.items?.length ?? 0,
+  ].join("|");
   return (
     <header className="app-shell flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-zinc-200 dark:border-zinc-800 px-3 py-2">
       <Link href="/" className="font-semibold tracking-tight text-base">
@@ -26,6 +45,14 @@ export function Header({
         </Link>
       </nav>
       <div className="ml-auto flex items-center gap-2 text-xs">
+        <WishlistPriceCounter
+          key={counterKey}
+          lang={lang}
+          signedIn={signedIn}
+          label={t("header.wishlistTotal")}
+          refreshKey={storeCc}
+          initialTotal={initialTotal}
+        />
         <form action="/auth/lang" method="post" className="flex items-center gap-1">
           <button
             type="submit"
@@ -38,7 +65,20 @@ export function Header({
         </form>
         {signedIn ? (
           <form action="/auth/logout" method="post">
-            <span className="text-xs opacity-70 mr-2">{displayName ?? "Steam user"}</span>
+            {avatar ? (
+              <Image
+                src={avatar}
+                alt=""
+                width={22}
+                height={22}
+                className="mr-2 inline-block rounded-full border border-zinc-300 dark:border-zinc-700 object-cover align-middle"
+              />
+            ) : null}
+            {displayName ? (
+              <span className="text-xs opacity-70 mr-2">{displayName}</span>
+            ) : !avatar ? (
+              <span className="text-xs opacity-70 mr-2">Steam user</span>
+            ) : null}
             <button
               type="submit"
               className="rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-200 dark:hover:bg-zinc-800"

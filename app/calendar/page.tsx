@@ -3,7 +3,6 @@ import { redirect } from "next/navigation";
 import { CalendarFeed } from "@/components/CalendarFeed";
 import { CalendarFeedSkeleton } from "@/components/CalendarFeedSkeleton";
 import { CalendarViewToggle } from "@/components/CalendarViewToggle";
-import { MonthTodayLink } from "@/components/MonthNav";
 import { getCalendarView, parseView } from "@/lib/display-mode";
 import { logDebug } from "@/lib/debug";
 import { getLang, getT } from "@/lib/i18n";
@@ -43,8 +42,6 @@ export default async function CalendarPage({
     getCalendarView(session.steamId),
   ]);
   const view = parseView(sp.view) ?? cookieView;
-  const monthValue = `${year}-${String(month1).padStart(2, "0")}`;
-  const query: Record<string, string | number> = { month: monthValue, view };
   logDebug("calendar.page.render", { view, year, month1 });
 
   return (
@@ -60,9 +57,6 @@ export default async function CalendarPage({
             {t("calendar.export.ics")}
           </a>
           <CalendarViewToggle lang={lang} view={view} year={year} month1={month1} />
-          {view === "grid" && (
-            <MonthTodayLink lang={lang} year={year} month1={month1} query={query} />
-          )}
         </div>
       </div>
 

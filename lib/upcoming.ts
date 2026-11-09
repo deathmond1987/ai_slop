@@ -1,12 +1,14 @@
 import "server-only";
 import type { IdentifiedSession, UpcomingGame } from "./types";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
 import { logDebug, sanitizeDebugError } from "./debug";
 import { getOwnedGames, getAppDetails, type AppDetails } from "./steam";
 import { fetchWishlist } from "./wishlist";
 import { searchRawg } from "./rawg";
 import { todayISO } from "./calendar";
 import { cacheGet, cacheSet } from "./cache-store";
-import { loadUpcomingWithCache } from "./aggregate-cache";
+import { loadUpcomingWithCache, upcomingCacheTtlMs } from "./aggregate-cache";
+import type { WishlistResultStatus } from "./wishlist-core.ts";
 import { applyKnownWishlistDatesAfterDetails } from "./release-dates.ts";
 import {
   addOwnedCandidates,
@@ -32,10 +34,19 @@ export interface UpcomingResult {
   wishlistPartial: boolean;
   wishlistShown: number;
   wishlistTotalKnown?: number;
+  wishlistStatus?: WishlistResultStatus;
 }
 
 const pendingUpcoming = new Map<string, Promise<UpcomingResult>>();
 const MAX_EARLY_OWNED_DETAIL_PREFETCH = 30;
+const TRANSIENT_UPCOMING_TTL_MS = 30_000;
+
+function upcomingResultCacheTtl(value: UpcomingResult): number {
+  if (value.warnings.includes("steamApi") || value.warnings.includes("noApiKey")) {
+    return TRANSIENT_UPCOMING_TTL_MS;
+  }
+  return upcomingCacheTtlMs();
+}
 
 export async function collectUpcoming(
   session: IdentifiedSession,
@@ -48,6 +59,7 @@ export async function collectUpcoming(
       steamId: session.steamId,
       apiKey: session.apiKey,
       rawgApiKey: rawgKey,
+      storeCc: session.storeCc,
       today,
     },
     cacheGet,
@@ -55,6 +67,7 @@ export async function collectUpcoming(
     pending: pendingUpcoming,
     factory: (_cacheKey, apiKeyHash, rawgKeyHash) =>
       collectUpcomingUncached(session, rawgKey, today, apiKeyHash, rawgKeyHash),
+    ttlMs: upcomingResultCacheTtl,
   });
 }
 
@@ -66,6 +79,7 @@ async function collectUpcomingUncached(
   rawgKeyHash: string
 ): Promise<UpcomingResult> {
   const collectStart = Date.now();
+  const normalizedStoreCc = normalizeSteamStoreCc(session.storeCc);
   let candidates: CandidateBuildResult = emptyCandidateResult();
   candidates.libraryAvailable = Boolean(session.apiKey);
 
@@ -74,10 +88,10 @@ async function collectUpcomingUncached(
   let wishlistItems = 0;
   let ownedCount = 0;
 
-  const wishlistPromise = fetchWishlist(session.steamId)
+  const wishlistPromise = fetchWishlist(session.steamId, normalizedStoreCc)
     .then((wl) => {
       wishlistItems = wl.items.length;
-      const fromWishlist = initializeCandidatesFromWishlist(wl);
+      const fromWishlist = initializeCandidatesFromWishlist(wl, normalizedStoreCc);
       candidates = {
         ...candidates,
         ...fromWishlist,
@@ -91,6 +105,7 @@ async function collectUpcomingUncached(
         error: sanitizeDebugError(error),
       });
       candidates.wishlistPrivate = true;
+      candidates.wishlistStatus = "private";
       candidates.warnings.push("wishlistHidden");
     });
 
@@ -127,6 +142,7 @@ async function collectUpcomingUncached(
       earlyDetailsPromise = getAppDetails(earlyAppids, {
         concurrency: 3,
         priority: "low",
+        storeCc: normalizedStoreCc,
       }).catch((error) => {
         logDebug("upcoming.earlyDetails.failed", {
           requested: earlyAppids.length,
@@ -166,7 +182,7 @@ async function collectUpcomingUncached(
       if (!detail) continue;
       candidates.prefetchedAppDetails.set(appid, detail);
       if (candidates.map.has(appid)) {
-        applyAppDetails(candidates.map, appid, detail);
+        applyAppDetails(candidates.map, appid, detail, normalizedStoreCc);
         applied += 1;
       }
     }
@@ -190,14 +206,14 @@ async function collectUpcomingUncached(
   });
 
   const detailsStart = Date.now();
-  const appids = selectDetailCandidates(candidates, today);
-  const fetchedDetails = await getAppDetails(appids);
+  const appids = selectDetailCandidates(candidates, today, normalizedStoreCc);
+  const fetchedDetails = await getAppDetails(appids, { storeCc: normalizedStoreCc });
   logDebug("upcoming.phase.details", {
     requested: appids.length,
     ms: Date.now() - detailsStart,
   });
   for (const [appid, detail] of fetchedDetails) {
-    applyAppDetails(candidates.map, appid, detail);
+    applyAppDetails(candidates.map, appid, detail, normalizedStoreCc);
   }
 
   applyKnownWishlistDatesAfterDetails(candidates.map.values());

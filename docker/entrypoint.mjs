@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   steam_id TEXT PRIMARY KEY REFERENCES users(steam_id) ON DELETE CASCADE,
   steam_api_key_cipher TEXT,
   rawg_api_key_cipher TEXT,
+  store_cc TEXT,
   calendar_view TEXT,
   lang TEXT,
   updated_at INTEGER NOT NULL
@@ -95,6 +96,13 @@ function deriveEncryptionKey(secret) {
   return scryptSync(secret, Buffer.from(CIPHER_SALT, "utf8"), 32);
 }
 
+function migrateUserSettings(db) {
+  const columns = db.prepare("PRAGMA table_info(user_settings)").all();
+  if (!columns.some((column) => column.name === "store_cc")) {
+    db.exec("ALTER TABLE user_settings ADD COLUMN store_cc TEXT");
+  }
+}
+
 async function prepareKeys() {
   const dir = path.dirname(DB_FILE);
   if (dir) mkdirSync(dir, { recursive: true });
@@ -110,6 +118,7 @@ async function prepareKeys() {
     db.exec("PRAGMA cache_size = -20000");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec(SCHEMA);
+    migrateUserSettings(db);
 
     const row = db.prepare(GET_APP_SETTING_SQL).get(SESSION_SECRET_KEY);
     let secret = typeof row?.value === "string" ? row.value : undefined;

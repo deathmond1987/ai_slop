@@ -1,6 +1,6 @@
 import "server-only";
 import { logDebug } from "./debug";
-import { getStatementRow, runStatement } from "./sqlite";
+import { getStatementRow, prepare, runStatement } from "./sqlite";
 
 const PRUNE_INTERVAL_MS = 60_000;
 const SELECT_SQL = "SELECT value FROM cache_entries WHERE key = ? AND expires_at > ?";
@@ -12,6 +12,9 @@ const UPSERT_SQL = `INSERT INTO cache_entries (key, value, expires_at, updated_a
    updated_at = excluded.updated_at`;
 const DELETE_SQL = "DELETE FROM cache_entries WHERE key = ?";
 const PRUNE_SQL = "DELETE FROM cache_entries WHERE expires_at <= ?";
+const DELETE_BY_PREFIX_SQL = "DELETE FROM cache_entries WHERE key LIKE ? ESCAPE '\\'";
+const DELETE_BY_EXACT_OR_PREFIX_SQL =
+  "DELETE FROM cache_entries WHERE key = ? OR key LIKE ? ESCAPE '\\'";
 
 let lastPruneAt = 0;
 
@@ -58,4 +61,51 @@ export async function cacheSet(key: string, value: unknown, ttlMs: number): Prom
 
   const now = Date.now();
   await runStatement(UPSERT_SQL, key, serialized, now + ttlMs, now);
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+export async function deleteCacheByPrefix(prefix: string): Promise<boolean> {
+  if (!prefix) return false;
+
+  pruneExpired();
+
+  const likePattern = `${escapeLikePattern(prefix)}%`;
+  const statement = await prepare(DELETE_BY_PREFIX_SQL);
+  if (!statement) return false;
+
+  try {
+    statement.run(likePattern);
+    return true;
+  } catch (error) {
+    logDebug("cacheStore.deleteByPrefix.failed", {
+      prefix,
+      error: String(error),
+    });
+    return false;
+  }
+}
+
+export async function deleteCacheByExactOrPrefix(prefix: string): Promise<boolean> {
+  if (!prefix) return false;
+
+  pruneExpired();
+
+  const escapedPrefix = escapeLikePattern(prefix);
+  const likePattern = `${escapedPrefix}:%`;
+  const statement = await prepare(DELETE_BY_EXACT_OR_PREFIX_SQL);
+  if (!statement) return false;
+
+  try {
+    statement.run(prefix, likePattern);
+    return true;
+  } catch (error) {
+    logDebug("cacheStore.deleteByExactOrPrefix.failed", {
+      prefix,
+      error: String(error),
+    });
+    return false;
+  }
 }

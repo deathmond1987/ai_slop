@@ -7,6 +7,7 @@ import {
   UPCOMING_CACHE_TTL_MS,
   upcomingCacheKeyFromContext,
   upcomingCacheKeyFromHashes,
+  upcomingStoreCcHash,
 } from "../lib/aggregate-cache.ts";
 import type { UpcomingCacheContext } from "../lib/aggregate-cache.ts";
 
@@ -351,4 +352,79 @@ test("logout and login reuse aggregate cache only by steamId and current setting
   assert.deepEqual(afterLogout, beforeLogout);
   assert.notEqual(otherUser.source, beforeLogout.source);
   assert.equal(calls, 2);
+});
+
+test("aggregate cache keys include normalized storeCc only when present", () => {
+  assert.equal(upcomingStoreCcHash(undefined), undefined);
+  assert.equal(upcomingStoreCcHash(null), undefined);
+  assert.equal(upcomingStoreCcHash(""), undefined);
+  assert.equal(upcomingStoreCcHash("DE"), shortHash("de"));
+  assert.equal(upcomingStoreCcHash("de"), shortHash("de"));
+  assert.equal(upcomingStoreCcHash(" de "), shortHash("de"));
+  assert.equal(upcomingStoreCcHash("invalid"), undefined);
+
+  assert.equal(
+    upcomingCacheKeyFromContext(contextFor({ storeCc: null })),
+    upcomingCacheKeyFromHashes(steamId, "none", "none", today)
+  );
+  assert.equal(
+    upcomingCacheKeyFromContext(contextFor({ storeCc: "DE" })),
+    upcomingCacheKeyFromHashes(steamId, "none", "none", today, shortHash("de"))
+  );
+  assert.notEqual(
+    upcomingCacheKeyFromContext(contextFor({ storeCc: "DE" })),
+    upcomingCacheKeyFromContext(contextFor())
+  );
+  assert.notEqual(
+    upcomingCacheKeyFromContext(contextFor({ storeCc: "DE" })),
+    upcomingCacheKeyFromContext(contextFor({ storeCc: "FR" }))
+  );
+});
+
+test("storeCc changes aggregate cache entries and null returns to default cache state", async () => {
+  const cache = createCacheFixture();
+  const pending = new Map<string, Promise<Fixture>>();
+  let calls = 0;
+  let context = contextFor();
+
+  async function load(source: string): Promise<Fixture> {
+    return loadUpcomingWithCache<Fixture>({
+      context,
+      cacheGet: cache.get,
+      cacheSet: cache.set,
+      pending,
+      factory: async () => {
+        calls += 1;
+        return fixtureFor(source);
+      },
+    });
+  }
+
+  const defaultCache = await load("default");
+
+  context = { ...context, storeCc: "DE" };
+  const deCache = await load("de");
+
+  context = { ...context, storeCc: "FR" };
+  const frCache = await load("fr");
+
+  context = { ...context, storeCc: null };
+  const backToDefault = await load("should-not-run");
+
+  assert.deepEqual(backToDefault, defaultCache);
+  assert.notEqual(defaultCache, deCache);
+  assert.notEqual(deCache, frCache);
+  assert.equal(calls, 3);
+  assert.equal(
+    cache.values.get(upcomingCacheKeyFromContext(contextFor())),
+    defaultCache
+  );
+  assert.equal(
+    cache.values.get(upcomingCacheKeyFromContext(contextFor({ storeCc: "DE" }))),
+    deCache
+  );
+  assert.equal(
+    cache.values.get(upcomingCacheKeyFromContext(contextFor({ storeCc: "FR" }))),
+    frCache
+  );
 });

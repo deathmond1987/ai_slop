@@ -18,10 +18,26 @@ export interface ApiWishlistResult {
   count: number | null;
 }
 
+export interface WishlistFinalizeDetailsLike {
+  name?: string;
+  header_image?: string;
+  release_date?: { date?: string };
+}
+
 export interface WishlistPageResult {
   items: WishlistItem[];
   private: boolean;
   totalKnown?: number;
+}
+
+export type WishlistResultStatus = "complete" | "empty" | "private" | "unknown";
+
+export interface WishlistResultStatusLike {
+  items?: readonly { appid?: unknown }[];
+  details?: readonly { appid?: unknown }[];
+  private?: boolean;
+  totalKnown?: number | null;
+  status?: WishlistResultStatus;
 }
 
 const STEAM_ASSET_BASE = "https://shared.fastly.steamstatic.com/store_item_assets/";
@@ -47,6 +63,161 @@ export function shouldFetchWishlistPage(api: ApiWishlistResult): boolean {
   if (api.items.length > 0) return wishlistPageFallbackEnabled();
   if (api.ok && (api.count ?? 0) === 0) return false;
   return true;
+}
+
+function asWishlistResultStatus(value: unknown): WishlistResultStatus | undefined {
+  return value === "complete" || value === "empty" || value === "private" || value === "unknown"
+    ? value
+    : undefined;
+}
+
+function statusAppid(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+  }
+  if (typeof value === "string" && /^\d+$/.test(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
+}
+
+function countWishlistResultAppids(result: WishlistResultStatusLike): number {
+  const appids = new Set<number>();
+  for (const item of result.items ?? []) {
+    const appid = statusAppid(item?.appid);
+    if (appid !== null) appids.add(appid);
+  }
+  for (const entry of result.details ?? []) {
+    const appid = statusAppid(entry?.appid);
+    if (appid !== null) appids.add(appid);
+  }
+  return appids.size;
+}
+
+export function wishlistResultStatus(result: WishlistResultStatusLike | undefined): WishlistResultStatus {
+  const explicit = asWishlistResultStatus(result?.status);
+  if (explicit) return explicit;
+
+  if (result?.private === true) return "private";
+
+  const knownCount = countWishlistResultAppids(result ?? {});
+  const totalKnown =
+    result?.totalKnown !== undefined && result?.totalKnown !== null && Number.isFinite(result.totalKnown)
+      ? result.totalKnown
+      : undefined;
+
+  if (knownCount === 0) {
+    return totalKnown === 0 ? "empty" : "unknown";
+  }
+
+  if (totalKnown === undefined) return "complete";
+  if (totalKnown <= 0) return "unknown";
+  return knownCount >= totalKnown ? "complete" : "unknown";
+}
+
+export function isCacheableWishlistResult(result: WishlistResultStatusLike | undefined): boolean {
+  return wishlistResultStatus(result) !== "unknown";
+}
+
+export function wishlistTotalGuardReason(result: WishlistResultStatusLike | undefined): string | undefined {
+  const status = wishlistResultStatus(result);
+  if (status === "private") return "wishlist_hidden";
+  if (status === "unknown") return "wishlist_failed";
+  return undefined;
+}
+
+export interface WishlistAggregateGuardLike {
+  wishlistPrivate?: boolean;
+  wishlistStatus?: WishlistResultStatus;
+  wishlistTotalKnown?: number | null;
+}
+
+export function aggregateWishlistGuardReason(
+  aggregate: WishlistAggregateGuardLike | undefined,
+  wishlist?: WishlistResultStatusLike
+): string | undefined {
+  if (!aggregate) return undefined;
+
+  if (aggregate.wishlistPrivate || aggregate.wishlistStatus === "private") {
+    return "wishlist_hidden";
+  }
+  if (aggregate.wishlistStatus === "complete" || aggregate.wishlistStatus === "empty") {
+    return undefined;
+  }
+  if (aggregate.wishlistStatus === "unknown") {
+    return "wishlist_failed";
+  }
+  if (!wishlist && (aggregate.wishlistTotalKnown ?? 0) > 0) {
+    return "wishlist_failed";
+  }
+  return undefined;
+}
+
+function isValidWishlistAppid(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+export function wishlistPageItemMap(pageItems: WishlistItem[]): Map<number, WishlistItem> {
+  const map = new Map<number, WishlistItem>();
+  for (const item of pageItems) {
+    if (isValidWishlistAppid(item.appid) && !map.has(item.appid)) {
+      map.set(item.appid, item);
+    }
+  }
+  return map;
+}
+
+export function wishlistApiAppidMap(apiItems: ApiWishlistItem[]): Map<number, ApiWishlistItem> {
+  const map = new Map<number, ApiWishlistItem>();
+  for (const item of apiItems) {
+    if (isValidWishlistAppid(item.appid) && !map.has(item.appid)) {
+      map.set(item.appid, item);
+    }
+  }
+  return map;
+}
+
+export function wishlistFinalizeAppids(
+  apiMap: Map<number, ApiWishlistItem>,
+  pageMap: Map<number, WishlistItem>
+): number[] {
+  if (apiMap.size > 0) return Array.from(apiMap.keys());
+  return Array.from(pageMap.keys());
+}
+
+export function needsWishlistAppDetails(
+  appid: number,
+  hasApiItems: boolean,
+  pageItem: WishlistItem | undefined
+): boolean {
+  if (!hasApiItems) return true;
+  const fallbackTitle = `App ${appid}`;
+  if (!pageItem || pageItem.title === fallbackTitle) return true;
+  if (!pageItem.coverImage) return true;
+  return !pageItem.releaseDateText;
+}
+
+export function buildWishlistFinalizedItems<T extends WishlistFinalizeDetailsLike>(
+  appids: number[],
+  pageMap: Map<number, WishlistItem>,
+  details: Map<number, T | null | undefined>
+): WishlistItem[] {
+  return appids.map((appid) => {
+    const pageItem = pageMap.get(appid);
+    const detail = details.get(appid);
+    const fallbackTitle = `App ${appid}`;
+    const title =
+      pageItem && pageItem.title && pageItem.title !== fallbackTitle
+        ? pageItem.title
+        : detail?.name || fallbackTitle;
+    return {
+      appid,
+      title,
+      coverImage: pageItem?.coverImage || detail?.header_image,
+      releaseDateText: pageItem?.releaseDateText || detail?.release_date?.date,
+    };
+  });
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

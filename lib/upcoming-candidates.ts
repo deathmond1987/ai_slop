@@ -1,4 +1,6 @@
-import type { RawgHit, UpcomingGame } from "./types";
+import type { RawgHit, SteamPriceOverview, UpcomingGame } from "./types";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
+import { wishlistResultStatus, type WishlistResultStatus } from "./wishlist-core.ts";
 import {
   applyKnownWishlistDate,
   applySteamDateInfo,
@@ -39,6 +41,8 @@ export interface AppDetailsLike {
   header_image?: string;
   genres?: { type: string; description: string }[];
   release_date?: { date: string; coming_soon: boolean };
+  fullgame?: { appid: string | number; name?: string };
+  price_overview?: SteamPriceOverview;
 }
 
 export interface OwnedGameLike {
@@ -51,6 +55,7 @@ export interface OwnedGameLike {
 
 export interface ScratchGame extends UpcomingGame {
   wishlistDateText?: string;
+  steamType?: string;
 }
 
 export interface WishlistItemLike {
@@ -70,6 +75,7 @@ export interface WishlistResultLike {
   private: boolean;
   totalKnown?: number;
   details?: WishlistDetailsEntryLike[];
+  status?: WishlistResultStatus;
 }
 
 export interface OwnedCandidate {
@@ -88,6 +94,7 @@ export interface CandidateBuildResult {
   wishlistPartial: boolean;
   wishlistShown: number;
   wishlistTotalKnown?: number;
+  wishlistStatus?: WishlistResultStatus;
 }
 
 function setScore(candidateScores: Map<number, number>, appid: number, score: number): void {
@@ -113,14 +120,30 @@ export function needsAppDetails(game: ScratchGame, today: string): boolean {
 export function applyAppDetails(
   map: Map<number, ScratchGame>,
   appid: number,
-  details: AppDetailsLike | null
+  details: AppDetailsLike | null,
+  storeCc?: string | null
 ): void {
   const game = map.get(appid);
   if (!game) return;
 
-  if (details?.type && DLC_TYPES.has(details.type.toLowerCase())) {
+  const type = details?.type?.toLowerCase();
+  if (type) game.steamType = type;
+
+  if (type && DLC_TYPES.has(type) && type !== "dlc") {
     map.delete(appid);
     return;
+  }
+
+  if (details && Object.prototype.hasOwnProperty.call(details, "is_free")) {
+    game.isFree = details.is_free === true;
+  }
+
+  const fullgameAppid = Number(details?.fullgame?.appid);
+  if (Number.isFinite(fullgameAppid) && fullgameAppid > 0) {
+    game.fullgame = {
+      appid: fullgameAppid,
+      name: details?.fullgame?.name,
+    };
   }
 
   if (details?.name) game.name = details.name;
@@ -141,6 +164,11 @@ export function applyAppDetails(
       );
     }
   }
+
+  if (details?.price_overview) {
+    game.price = details.price_overview;
+    game.priceCc = normalizeSteamStoreCc(storeCc) ?? game.priceCc;
+  }
 }
 
 export function emptyCandidateResult(): CandidateBuildResult {
@@ -154,17 +182,28 @@ export function emptyCandidateResult(): CandidateBuildResult {
     wishlistPartial: false,
     wishlistShown: 0,
     wishlistTotalKnown: undefined,
+    wishlistStatus: undefined,
   };
 }
 
-export function initializeCandidatesFromWishlist(wishlist: WishlistResultLike): CandidateBuildResult {
+export function initializeCandidatesFromWishlist(
+  wishlist: WishlistResultLike,
+  storeCc?: string | null
+): CandidateBuildResult {
   const result = emptyCandidateResult();
-  result.wishlistPrivate = wishlist.private;
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  const status = wishlistResultStatus(wishlist);
+  const isPrivate = wishlist.private || status === "private";
+  result.wishlistPrivate = isPrivate;
+  result.wishlistStatus = status;
   result.wishlistShown = wishlist.items.length;
-  result.wishlistTotalKnown = wishlist.private ? undefined : wishlist.totalKnown;
+  result.wishlistTotalKnown = isPrivate ? undefined : wishlist.totalKnown;
 
-  if (wishlist.private) {
+  if (isPrivate) {
     result.warnings.push("wishlistHidden");
+  } else if (status === "unknown") {
+    result.wishlistPartial = true;
+    result.warnings.push("wishlistFailed");
   } else if ((wishlist.totalKnown ?? 0) > wishlist.items.length) {
     result.wishlistPartial = true;
     result.warnings.push("wishlistPartial");
@@ -199,7 +238,7 @@ export function initializeCandidatesFromWishlist(wishlist: WishlistResultLike): 
     if (!Number.isFinite(entry.appid) || entry.appid <= 0) continue;
     if (!entry.details) continue;
     result.prefetchedAppDetails.set(entry.appid, entry.details);
-    applyAppDetails(result.map, entry.appid, entry.details);
+    applyAppDetails(result.map, entry.appid, entry.details, normalizedStoreCc);
   }
 
   return result;
@@ -288,16 +327,25 @@ export function scoreOwnedCandidate(g: OwnedGameLike, nowMs: number): number {
 
 export function selectDetailCandidates(
   result: CandidateBuildResult,
-  today: string
+  today: string,
+  storeCc?: string | null
 ): number[] {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
   const detailCandidates: Array<[number, number]> = [];
   for (const [appid, score] of result.candidateScores) {
     const game = result.map.get(appid);
     if (!game) continue;
     if (!Number.isFinite(appid) || appid <= 0) continue;
-    if (result.prefetchedAppDetails.has(appid)) continue;
-    if (hasKnownReleasedSteamDate(game, today)) continue;
-    if (!needsAppDetails(game, today)) continue;
+
+    const hasPrefetched = result.prefetchedAppDetails.has(appid);
+    const prefetchedDetails = result.prefetchedAppDetails.get(appid);
+    const hasRegionalPrefetchedPrice = Boolean(
+      normalizedStoreCc && prefetchedDetails?.price_overview
+    );
+
+    if (hasPrefetched && (!normalizedStoreCc || hasRegionalPrefetchedPrice)) continue;
+    if (hasKnownReleasedSteamDate(game, today) && !hasRegionalPrefetchedPrice) continue;
+    if (!needsAppDetails(game, today) && !normalizedStoreCc) continue;
     detailCandidates.push([appid, score]);
   }
 
@@ -365,10 +413,15 @@ export function buildUpcomingList(map: Map<number, ScratchGame>): UpcomingGame[]
     dateSource: g.dateSource,
     dateSourceUrl: g.dateSourceUrl,
     steamUrl: g.steamUrl,
+    steamType: g.steamType,
+    isFree: g.isFree,
+    fullgame: g.fullgame,
     genres: g.genres,
     playtimeForever: g.playtimeForever,
     developer: g.developer,
     publisher: g.publisher,
+    price: g.price,
+    priceCc: g.priceCc,
   }));
 
   list.sort((a, b) => {
@@ -400,6 +453,7 @@ export function toUpcomingResult(result: CandidateBuildResult, games: UpcomingGa
     wishlistPartial: result.wishlistPartial,
     wishlistShown: result.wishlistShown,
     wishlistTotalKnown: result.wishlistTotalKnown,
+    wishlistStatus: result.wishlistStatus,
   };
 }
 

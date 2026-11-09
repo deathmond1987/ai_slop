@@ -1,15 +1,25 @@
 import { keyHash } from "./key-hash.ts";
+import { normalizeSteamStoreCc } from "./store-cc.ts";
 
 export interface SteamCacheableAppDetails {
   release_date?: { date: string; coming_soon: boolean };
 }
 
+export const APP_DETAILS_TRANSIENT_MISS = { transientAppDetails: true } as const;
+export type AppDetailsTransientMiss = typeof APP_DETAILS_TRANSIENT_MISS;
+export type AppDetailsCacheInput = SteamCacheableAppDetails | null | AppDetailsTransientMiss;
+
 export const APP_DETAILS_TTL_MS = 6 * 60 * 60 * 1000;
 export const APP_DETAILS_NEGATIVE_TTL_MS = 5 * 60 * 1000;
 export const APP_DETAILS_VOLATILE_TTL_MS = 15 * 60 * 1000;
 export const APP_DETAILS_CACHE_PREFIX = "appdetails:";
+export const OWNED_CACHE_PREFIX = "owned:";
 export const OWNED_TTL_MS = 10 * 60 * 1000;
+export const STEAM_PROFILE_TTL_MS = 24 * 60 * 60 * 1000;
+export const STEAM_PROFILE_NEGATIVE_TTL_MS = 30 * 60 * 1000;
+export const STEAM_PROFILE_CACHE_PREFIX = "steamprofile:";
 export const STEAM_FETCH_TIMEOUT_MS = 15000;
+export const STEAM_PROFILE_TIMEOUT_MS = 8000;
 export const STEAM_APPDETAILS_TIMEOUT_MS = 10000;
 export const STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS = 6000;
 export const STEAM_APPDETAILS_CONCURRENCY = 8;
@@ -83,14 +93,24 @@ export function steamApiKeyHash(key: string, cached?: string): string {
 }
 
 export function ownedCacheKey(steamId: string, key: string, cachedKeyHash?: string): string {
-  return `owned:${steamId}:${steamApiKeyHash(key, cachedKeyHash)}`;
+  return `${OWNED_CACHE_PREFIX}${steamId}:${steamApiKeyHash(key, cachedKeyHash)}`;
 }
 
-export function appDetailsCacheKey(appid: number): string {
-  return `${APP_DETAILS_CACHE_PREFIX}${appid}`;
+export function appDetailsCacheKey(
+  appid: number,
+  storeCc?: string | null | undefined
+): string {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  if (!normalizedStoreCc) return `${APP_DETAILS_CACHE_PREFIX}${appid}`;
+  return `${APP_DETAILS_CACHE_PREFIX}${appid}:${normalizedStoreCc}`;
 }
 
-export function appDetailsCacheTtl(details: SteamCacheableAppDetails | null): number {
+export function isTransientAppDetailsCache(value: unknown): value is AppDetailsTransientMiss {
+  return value === APP_DETAILS_TRANSIENT_MISS;
+}
+
+export function appDetailsCacheTtl(details: AppDetailsCacheInput): number {
+  if (isTransientAppDetailsCache(details)) return 0;
   if (!details) return APP_DETAILS_NEGATIVE_TTL_MS;
   const release = details.release_date;
   if (!release) return APP_DETAILS_TTL_MS;
@@ -98,4 +118,116 @@ export function appDetailsCacheTtl(details: SteamCacheableAppDetails | null): nu
     return APP_DETAILS_VOLATILE_TTL_MS;
   }
   return APP_DETAILS_TTL_MS;
+}
+
+export function steamProfileTimeoutMs(): number {
+  return parsePositiveInt(process.env.STEAM_PROFILE_TIMEOUT_MS, STEAM_PROFILE_TIMEOUT_MS);
+}
+
+export interface SteamProfile {
+  displayName?: string;
+  avatar?: string;
+}
+
+export function steamProfileCacheKey(steamId: string): string {
+  return `${STEAM_PROFILE_CACHE_PREFIX}${steamId}`;
+}
+
+export function steamProfileCacheTtl(profile: SteamProfile | null): number {
+  return profile && (profile.displayName || profile.avatar) ? STEAM_PROFILE_TTL_MS : STEAM_PROFILE_NEGATIVE_TTL_MS;
+}
+
+const STEAM_AVATAR_HOSTS = new Set([
+  "avatars.akamai.steamstatic.com",
+  "avatars.fastly.steamstatic.com",
+  "community.akamai.steamstatic.com",
+  "community.cloudflare.steamstatic.com",
+]);
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
+export function normalizeSteamProfileAvatar(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const raw = value.trim();
+  if (!raw) return undefined;
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return undefined;
+    if (!STEAM_AVATAR_HOSTS.has(url.hostname)) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeSteamProfileDisplayName(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const decoded = decodeHtmlEntities(value).trim();
+  if (!decoded) return undefined;
+
+  const match = decoded.match(/^steam community\s*::\s*(.+)$/i);
+  const name = (match?.[1] ?? decoded).trim();
+  if (
+    !name ||
+    /^steam community$/i.test(name) ||
+    /^sign in$/i.test(name) ||
+    /^private$/i.test(name)
+  ) {
+    return undefined;
+  }
+  return name.slice(0, 120);
+}
+
+export function parseSteamProfileHtml(html: string): SteamProfile {
+  return {
+    displayName: normalizeSteamProfileDisplayName(getOpenGraphMeta(html, "og:title")),
+    avatar: normalizeSteamProfileAvatar(getOpenGraphMeta(html, "og:image")),
+  };
+}
+
+function getOpenGraphMeta(html: string, property: string): string | undefined {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`<meta[^>]+property=["']${escaped}["'][^>]*content=["']([^"']+)["']`, "i"),
+    new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*property=["']${escaped}["']`, "i"),
+  ];
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return match[1];
+  }
+
+  return undefined;
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (entity, name: string) => {
+    const key = name.toLowerCase();
+    const named = HTML_ENTITIES[key];
+    if (named) return named;
+
+    if (key.startsWith("#x")) {
+      const codePoint = Number.parseInt(key.slice(2), 16);
+      return safeCodePoint(codePoint);
+    }
+
+    if (key.startsWith("#")) {
+      const codePoint = Number.parseInt(key.slice(1), 10);
+      return safeCodePoint(codePoint);
+    }
+
+    return entity;
+  });
+}
+
+function safeCodePoint(codePoint: number): string {
+  if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return "";
+  return String.fromCodePoint(codePoint);
 }

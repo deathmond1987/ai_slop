@@ -4,10 +4,12 @@ import {
   applyKnownWishlistDate,
   applySteamDateInfo,
   hasKnownSteamDate,
+  hasKnownReleasedSteamDate,
   isPlaceholderYearEndDate,
   parseSteamDateInfo,
   parseSteamDateText,
   shouldRemovePastYearOnlySteamGame,
+  shouldRemoveKnownReleasedSteamGame,
   type ReleaseDateGame,
 } from "../lib/release-dates.ts";
 
@@ -74,4 +76,14 @@ test("removes year-only Steam games from past years only", () => {
   const game = scratch({ dateSource: "steamYear", releaseYear: 2026 });
   assert.equal(shouldRemovePastYearOnlySteamGame(game, 2027), true);
   assert.equal(shouldRemovePastYearOnlySteamGame(game, 2026), false);
+});
+
+test("keeps known Steam releases on today and removes earlier releases", () => {
+  const today = scratch({ dateSource: "steam", releaseDate: "2026-11-06" });
+  const yesterday = scratch({ dateSource: "steam", releaseDate: "2026-11-05" });
+
+  assert.equal(hasKnownReleasedSteamDate(today, "2026-11-06"), false);
+  assert.equal(shouldRemoveKnownReleasedSteamGame(today, "2026-11-06"), false);
+  assert.equal(hasKnownReleasedSteamDate(yesterday, "2026-11-06"), true);
+  assert.equal(shouldRemoveKnownReleasedSteamGame(yesterday, "2026-11-06"), true);
 });

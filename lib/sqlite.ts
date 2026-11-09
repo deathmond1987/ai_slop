@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   steam_id TEXT PRIMARY KEY REFERENCES users(steam_id) ON DELETE CASCADE,
   steam_api_key_cipher TEXT,
   rawg_api_key_cipher TEXT,
+  store_cc TEXT,
   calendar_view TEXT,
   lang TEXT,
   updated_at INTEGER NOT NULL
@@ -65,6 +66,17 @@ let dbPromise: Promise<DatabaseSync | undefined> | undefined;
 let dbUnavailable = false;
 const statementCache = new Map<string, StatementSync>();
 
+interface ColumnInfoRow {
+  name?: string;
+}
+
+function migrateUserSettings(db: DatabaseSync): void {
+  const columns = db.prepare("PRAGMA table_info(user_settings)").all() as ColumnInfoRow[];
+  if (!columns.some((column) => column.name === "store_cc")) {
+    db.exec("ALTER TABLE user_settings ADD COLUMN store_cc TEXT");
+  }
+}
+
 async function openDb(): Promise<DatabaseSync | undefined> {
   try {
     const { DatabaseSync } = await import("node:sqlite");
@@ -79,6 +91,7 @@ async function openDb(): Promise<DatabaseSync | undefined> {
     db.exec("PRAGMA cache_size = -20000");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec(SCHEMA);
+    migrateUserSettings(db);
 
     return db;
   } catch (error) {

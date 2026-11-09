@@ -61,7 +61,7 @@ export function MonthTodayLink({
   if (current === todayStr) return null;
 
   return (
-    <Link href={monthHref(todayYear, todayMonth1, query)} className="underline text-sm">
+    <Link href={monthHref(todayYear, todayMonth1, query)} className="text-scale-10 underline opacity-70 hover:opacity-100">
       {t("calendar.today")}
     </Link>
   );

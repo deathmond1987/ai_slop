@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import { loadWithCacheAndDedupe } from "../lib/cached-dedupe.ts";
 import {
   APP_DETAILS_NEGATIVE_TTL_MS,
+  APP_DETAILS_TRANSIENT_MISS,
   APP_DETAILS_TTL_MS,
   APP_DETAILS_VOLATILE_TTL_MS,
   appDetailsCacheKey,
   appDetailsCacheTtl,
   ownedCacheKey,
+  type AppDetailsTransientMiss,
 } from "../lib/steam-core.ts";
 import {
   RAWG_NEGATIVE_TTL_MS,
@@ -26,6 +28,7 @@ function createCacheStore() {
     sets,
     get: async <T>(key: string) => values.get(key) as T | undefined,
     set: async (key: string, value: unknown, ttlMs: number) => {
+      if (ttlMs <= 0) return;
       values.set(key, value);
       sets.push({ key, value, ttlMs });
     },
@@ -119,8 +122,33 @@ test("loadWithCacheAndDedupe clears pending entries after factory rejection", as
   assert.equal(cache.sets.length, 0);
 });
 
+test("loadWithCacheAndDedupe does not cache transient appdetails misses", async () => {
+  const cache = createCacheStore();
+  const pending = new Map<string, Promise<AppDetailsTransientMiss>>();
+  let calls = 0;
+
+  const options = () => ({
+    cacheKey: "appdetails:123:kz",
+    pending,
+    cacheGet: cache.get,
+    cacheSet: cache.set,
+    factory: async (): Promise<AppDetailsTransientMiss> => {
+      calls += 1;
+      return APP_DETAILS_TRANSIENT_MISS;
+    },
+    ttlMs: appDetailsCacheTtl,
+  });
+
+  assert.equal(await loadWithCacheAndDedupe(options()), APP_DETAILS_TRANSIENT_MISS);
+  assert.equal(await loadWithCacheAndDedupe(options()), APP_DETAILS_TRANSIENT_MISS);
+  assert.equal(calls, 2);
+  assert.equal(cache.sets.length, 0);
+  assert.equal(cache.values.get("appdetails:123:kz"), undefined);
+});
+
 test("Steam appdetails cache TTLs distinguish negative, volatile and stable values", () => {
   assert.equal(appDetailsCacheTtl(null), APP_DETAILS_NEGATIVE_TTL_MS);
+  assert.equal(appDetailsCacheTtl(APP_DETAILS_TRANSIENT_MISS), 0);
   assert.equal(
     appDetailsCacheTtl({ release_date: { date: "2027", coming_soon: false } }),
     APP_DETAILS_VOLATILE_TTL_MS
@@ -142,6 +170,13 @@ test("Steam appdetails cache TTLs distinguish negative, volatile and stable valu
 test("Steam cache keys use stable hashed key segments", () => {
   assert.equal(ownedCacheKey("10000000000000000", "steam-key", "hash123"), "owned:10000000000000000:hash123");
   assert.equal(appDetailsCacheKey(123), "appdetails:123");
+});
+
+test("Steam appdetails cache keys are regional only when storeCc is present", () => {
+  assert.equal(appDetailsCacheKey(123, null), "appdetails:123");
+  assert.equal(appDetailsCacheKey(123, "DE"), "appdetails:123:de");
+  assert.equal(appDetailsCacheKey(123, " de "), "appdetails:123:de");
+  assert.equal(appDetailsCacheKey(123, "invalid"), "appdetails:123");
 });
 
 test("RAWG cache keys and TTLs are stable and negative-aware", () => {
