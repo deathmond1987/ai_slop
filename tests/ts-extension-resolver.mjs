@@ -4,6 +4,13 @@ import { fileURLToPath } from "node:url";
 const extensions = [".ts", ".tsx", ".mts", ".js", ".jsx", ".mjs", ".json"];
 
 export async function resolve(specifier, context, nextResolve) {
+  if (specifier === "server-only") {
+    return {
+      url: new URL("./server-only-stub.mjs", import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
+
   if (
     (specifier.startsWith("./") || specifier.startsWith("../")) &&
     !/\.[a-z0-9]+$/i.test(specifier)
