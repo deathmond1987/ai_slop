@@ -235,12 +235,22 @@ function setCachedWishlist(
   return cacheSet(wishlistCacheKey(steamId, storeCcHash), result, WISHLIST_CACHE_TTL_MS);
 }
 
-export async function fetchWishlist(steamId: string, storeCc?: string | null): Promise<WishlistResult> {
+export interface FetchWishlistOptions {
+  refresh?: boolean;
+}
+
+export async function fetchWishlist(
+  steamId: string,
+  storeCc?: string | null,
+  options: FetchWishlistOptions = {}
+): Promise<WishlistResult> {
   const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
   const storeCcHash = wishlistStoreCcHash(storeCc);
   const pendingKey = wishlistCacheKey(steamId, storeCcHash);
-  const cached = await getCachedWishlist(steamId, storeCcHash);
-  if (cached !== undefined && isCacheableWishlistResult(cached)) return cached;
+  if (options.refresh !== true) {
+    const cached = await getCachedWishlist(steamId, storeCcHash);
+    if (cached !== undefined && isCacheableWishlistResult(cached)) return cached;
+  }
 
   const inflight = pendingWishlist.get(pendingKey);
   if (inflight) return inflight;

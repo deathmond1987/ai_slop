@@ -22,5 +22,7 @@ export async function GET(req: NextRequest) {
     returnToHost: returnToUrl.host,
     returnToProtocol: returnToUrl.protocol.replace(":", ""),
   });
-  return NextResponse.redirect(`${STEAM_OPENID_ENDPOINT}?${params.toString()}`);
+  return NextResponse.redirect(`${STEAM_OPENID_ENDPOINT}?${params.toString()}`, {
+    headers: { "Cache-Control": "no-store" },
+  });
 }

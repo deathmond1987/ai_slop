@@ -1,11 +1,23 @@
 import { Suspense } from "react";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { CalendarFeed } from "@/components/CalendarFeed";
 import { CalendarFeedSkeleton } from "@/components/CalendarFeedSkeleton";
 import { CalendarViewToggle } from "@/components/CalendarViewToggle";
+import {
+  createCalendarFeedLink,
+  revokeCalendarFeedLink,
+} from "@/app/actions/calendar-feed";
+import { getCalendarFeedToken } from "@/lib/auth-store";
+import {
+  calendarFeedPath,
+  calendarFeedUrl,
+  googleCalendarImportUrl,
+} from "@/lib/calendar-feed-link";
 import { getCalendarView, parseView } from "@/lib/display-mode";
 import { logDebug } from "@/lib/debug";
 import { getLang, getT } from "@/lib/i18n";
+import { getExternalOriginFromHeaders } from "@/lib/requestOrigin";
 import { requireSteamSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -42,13 +54,82 @@ export default async function CalendarPage({
     getCalendarView(session.steamId),
   ]);
   const view = parseView(sp.view) ?? cookieView;
-  logDebug("calendar.page.render", { view, year, month1 });
+  const requestHeaders = await headers();
+  const origin = getExternalOriginFromHeaders(requestHeaders);
+  const feedToken = await getCalendarFeedToken(session.steamId);
+  const feedPath = feedToken ? calendarFeedPath(feedToken) : undefined;
+  const feedUrl = feedToken && origin ? calendarFeedUrl(origin, feedToken) : undefined;
+  const googleUrl = feedUrl ? googleCalendarImportUrl(feedUrl) : undefined;
+  const feedStatus = Array.isArray(sp.feed) ? sp.feed[0] : sp.feed;
+  const monthValue = `${year}-${String(month1).padStart(2, "0")}`;
+  logDebug("calendar.page.render", {
+    view,
+    year,
+    month1,
+    hasFeedToken: Boolean(feedToken),
+    hasOrigin: Boolean(origin),
+  });
 
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
         <h1 className="text-lg font-semibold">{t("calendar.title")}</h1>
         <div className="flex items-center gap-1 flex-wrap">
+          {feedPath ? (
+            <>
+              <a
+                href={googleUrl ?? feedPath}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded bg-[#1b2838] px-3 py-1 text-white hover:bg-[#2a475e]"
+              >
+                {googleUrl ? t("calendar.subscribe.google") : t("calendar.subscribe.ics")}
+              </a>
+              {feedUrl && googleUrl ? (
+                <details className="relative">
+                  <summary className="cursor-pointer rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                    {t("calendar.feed.manage")}
+                  </summary>
+                  <div className="absolute right-0 z-10 mt-1 w-[min(30rem,calc(100vw-2rem))] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow">
+                    <p className="mb-2 text-xs opacity-70">{t("calendar.feed.help")}</p>
+                    <input
+                      readOnly
+                      value={feedUrl}
+                      className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs font-mono"
+                    />
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <a
+                        href={feedPath}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        {t("calendar.feed.ics")}
+                      </a>
+                      <form action={revokeCalendarFeedLink}>
+                        <input type="hidden" name="month" value={monthValue} />
+                        <input type="hidden" name="view" value={view} />
+                        <button type="submit" className="text-xs text-red-600 hover:underline">
+                          {t("calendar.feed.revoke")}
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </details>
+              ) : null}
+            </>
+          ) : (
+            <form action={createCalendarFeedLink}>
+              <input type="hidden" name="month" value={monthValue} />
+              <input type="hidden" name="view" value={view} />
+              <button
+                type="submit"
+                className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                {t("calendar.subscribe.ics")}
+              </button>
+            </form>
+          )}
           <a
             href="/calendar/ics"
             download
@@ -59,6 +140,18 @@ export default async function CalendarPage({
           <CalendarViewToggle lang={lang} view={view} year={year} month1={month1} />
         </div>
       </div>
+
+      {feedStatus === "created" && (
+        <div className="text-xs rounded border border-green-300 dark:border-green-700 bg-green-100 dark:bg-green-900/30 px-3 py-2">
+          {t("calendar.feed.flash.created")}
+        </div>
+      )}
+
+      {feedStatus === "revoked" && (
+        <div className="text-xs rounded border border-yellow-300 dark:border-yellow-700 bg-yellow-100 dark:bg-yellow-900/30 px-3 py-2">
+          {t("calendar.feed.flash.revoked")}
+        </div>
+      )}
 
       <Suspense fallback={<CalendarFeedSkeleton view={view} />}>
         <CalendarFeed session={session} lang={lang} view={view} year={year} month1={month1} />

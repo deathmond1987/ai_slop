@@ -11,12 +11,14 @@ import { collectUpcoming, type UpcomingResult } from "./upcoming";
 import type { IdentifiedSession, SteamSession } from "./types";
 import { wishlistCacheKey, wishlistStoreCcHash } from "./wishlist-cache-core";
 import { aggregateWishlistGuardReason, wishlistTotalGuardReason } from "./wishlist-core.ts";
-import type { WishlistResult } from "./wishlist";
+import { fetchWishlist, type WishlistResult } from "./wishlist";
 import {
   computeWishlistPriceTotal,
+  filterWishlistPriceCandidatesByCurrentWishlist,
   markOwnedCandidates,
   mergeWishlistPriceCandidates,
   ownedAppIdSet,
+  wishlistAppIdSetFromCacheResult,
   wishlistCandidatesFromCacheResult,
   wishlistCardFieldsFromUpcomingGame,
   wishlistItemEntriesFromCandidates,
@@ -114,6 +116,7 @@ export async function getWishlistTotalForSession(
   try {
     let aggregate = await cacheGet<UpcomingResult>(aggregateKey);
     let wishlist = await cacheGet<WishlistResult>(wishlistKey);
+    let wishlistCheckedForRefresh = false;
 
     if (!aggregate && !wishlist) {
       if (!refresh) {
@@ -129,6 +132,7 @@ export async function getWishlistTotalForSession(
       try {
         aggregate = await collectUpcoming(identifiedSession, rawgKey);
         wishlist = await cacheGet<WishlistResult>(wishlistKey);
+        wishlistCheckedForRefresh = true;
       } catch (error) {
         logDebug("wishlistTotal.refresh.failed", {
           steamId,
@@ -139,8 +143,31 @@ export async function getWishlistTotalForSession(
       }
     }
 
+    if (refresh && !wishlistCheckedForRefresh) {
+      try {
+        wishlist = await fetchWishlist(steamId, normalizedStoreCc, { refresh: true });
+      } catch (error) {
+        logDebug("wishlistTotal.refreshWishlist.failed", {
+          steamId,
+          storeCc: normalizedStoreCc,
+          error: String(error),
+        });
+        return { ready: false, reason: "wishlist_failed" };
+      }
+    }
+
+    if (refresh && !wishlist) {
+      logDebug("wishlistTotal.refreshWishlist.missing", {
+        steamId,
+        storeCc: normalizedStoreCc,
+        hasAggregate: Boolean(aggregate),
+      });
+      return { ready: false, reason: "wishlist_failed" };
+    }
+
     const guardReason =
-      wishlistTotalGuardReason(wishlist) ?? aggregateWishlistGuardReason(aggregate, wishlist);
+      wishlistTotalGuardReason(wishlist) ??
+      (wishlist ? undefined : aggregateWishlistGuardReason(aggregate, wishlist));
     if (guardReason) {
       logDebug("wishlistTotal.guard", {
         steamId,
@@ -157,8 +184,14 @@ export async function getWishlistTotalForSession(
     }
 
     const ownedAppIds = await ownedAppIdsForSession(steamId, session.apiKey, refresh);
+    const currentWishlistAppids = wishlist
+      ? wishlistAppIdSetFromCacheResult(wishlist)
+      : undefined;
     const candidates = markOwnedCandidates(
-      candidatesFromCaches(aggregate, wishlist, normalizedStoreCc),
+      filterWishlistPriceCandidatesByCurrentWishlist(
+        candidatesFromCaches(aggregate, wishlist, normalizedStoreCc),
+        currentWishlistAppids
+      ),
       ownedAppIds
     );
     const items = wishlistItemEntriesFromCandidates(candidates);

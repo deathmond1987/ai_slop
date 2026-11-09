@@ -2,12 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   computeWishlistPriceTotal,
+  filterWishlistPriceCandidatesByCurrentWishlist,
   markOwnedCandidates,
   mergeWishlistPriceCandidates,
   ownedAppIdSet,
+  wishlistAppIdSetFromCacheResult,
   wishlistCandidatesFromCacheDetails,
   wishlistCandidatesFromCacheResult,
   wishlistItemEntriesFromCandidates,
+  type WishlistPriceCandidate,
 } from "../lib/wishlist-total.ts";
 
 test("sums wishlist prices in the configured store region", () => {
@@ -477,4 +480,75 @@ test("wishlist modal items include only priced wishlist candidates", () => {
   assert.equal(total?.count, 2);
   assert.equal(total?.discountCount, 1);
   assert.deepEqual(total?.discounts.map((entry) => entry.appid), [20]);
+});
+
+test("collects current wishlist appids from cached items and details", () => {
+  const appids = wishlistAppIdSetFromCacheResult({
+    items: [{ appid: 10 }, { appid: 20 }, { appid: 0 }],
+    details: [{ appid: 20 }, { appid: 30 }, { appid: -1 }],
+  });
+
+  assert.deepEqual([...appids].sort((a, b) => a - b), [10, 20, 30]);
+});
+
+test("removes stale wishlist candidates that are no longer on the current wishlist", () => {
+  const candidates = mergeWishlistPriceCandidates(
+    [
+      {
+        appid: 100,
+        name: "Removed from wishlist",
+        steamUrl: "https://store.steampowered.com/app/100/",
+        sources: ["wishlist"],
+        price: { currency: "eur", initial: 2000, final: 1000, discount_percent: 50 },
+        priceCc: "de",
+      },
+      {
+        appid: 200,
+        name: "Still wishlisted",
+        steamUrl: "https://store.steampowered.com/app/200/",
+        sources: ["wishlist"],
+        price: { currency: "eur", initial: 3000, final: 900, discount_percent: 70 },
+        priceCc: "de",
+      },
+      {
+        appid: 300,
+        name: "Library candidate",
+        steamUrl: "https://store.steampowered.com/app/300/",
+        sources: ["library"],
+        price: { currency: "eur", initial: 4000, final: 800, discount_percent: 80 },
+        priceCc: "de",
+      },
+    ],
+    []
+  );
+
+  const filtered = filterWishlistPriceCandidatesByCurrentWishlist(
+    candidates,
+    wishlistAppIdSetFromCacheResult({ items: [{ appid: 200 }] })
+  );
+
+  assert.deepEqual(filtered.map((candidate) => candidate.appid), [200, 300]);
+  assert.deepEqual(computeWishlistPriceTotal(filtered, "DE")?.discounts.map((entry) => entry.appid), [200]);
+});
+
+test("empty current wishlist removes all wishlist-sourced aggregate candidates", () => {
+  const filtered = filterWishlistPriceCandidatesByCurrentWishlist(
+    [
+      { appid: 100, sources: ["wishlist"], price: { currency: "eur", final: 1000 }, priceCc: "de" },
+      { appid: 300, sources: ["library"], price: { currency: "eur", final: 800 }, priceCc: "de" },
+    ],
+    wishlistAppIdSetFromCacheResult({ items: [], details: [] })
+  );
+
+  assert.deepEqual(filtered.map((candidate) => candidate.appid), [300]);
+  assert.deepEqual(computeWishlistPriceTotal(filtered, "DE"), undefined);
+});
+
+test("missing current wishlist appids does not remove aggregate candidates", () => {
+  const candidates: WishlistPriceCandidate[] = [
+    { appid: 100, sources: ["wishlist"], price: { currency: "eur", final: 1000 }, priceCc: "de" },
+    { appid: 300, sources: ["library"], price: { currency: "eur", final: 800 }, priceCc: "de" },
+  ];
+
+  assert.deepEqual(filterWishlistPriceCandidatesByCurrentWishlist(candidates, undefined), candidates);
 });

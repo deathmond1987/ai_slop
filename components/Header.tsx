@@ -87,12 +87,12 @@ export function Header({
             </button>
           </form>
         ) : (
-          <Link
+          <a
             href="/auth/login"
             className="rounded bg-[#1b2838] px-3 py-1.5 text-xs text-white hover:bg-[#2a475e]"
           >
             {t("nav.login")}
-          </Link>
+          </a>
         )}
       </div>
     </header>

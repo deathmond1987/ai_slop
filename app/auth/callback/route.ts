@@ -6,8 +6,8 @@ import { extractSteamIdFromOpenId, getSteamProfile } from "@/lib/steam";
 import { getExternalOrigin, shouldUseSecureSessionCookie } from "@/lib/requestOrigin";
 
 const STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/login";
-const DEFAULT_STEAM_OPENID_TIMEOUT_MS = 15000;
-const MAX_STEAM_OPENID_TIMEOUT_MS = 30000;
+const DEFAULT_STEAM_OPENID_TIMEOUT_MS = 45000;
+const MAX_STEAM_OPENID_TIMEOUT_MS = 60000;
 const DEFAULT_STEAM_OPENID_VERIFY_ATTEMPTS = 2;
 const MAX_STEAM_OPENID_VERIFY_ATTEMPTS = 3;
 
@@ -36,8 +36,14 @@ function steamOpenidVerifyAttempts(): number {
   return Math.max(1, Math.min(attempts, MAX_STEAM_OPENID_VERIFY_ATTEMPTS));
 }
 
+function isTimeoutOpenIdFetchError(error: unknown): boolean {
+  return /timeout|timed out|abort/i.test(sanitizeDebugError(error));
+}
+
 function isRetryableOpenIdFetchError(error: unknown): boolean {
-  return /timeout|timed out|aborted|fetch failed|network|connect|socket|dns|tls|eai_again|enotfound|undici/i.test(
+  if (isTimeoutOpenIdFetchError(error)) return false;
+
+  return /fetch failed|network|connect|socket|dns|tls|eai_again|enotfound|undici/i.test(
     sanitizeDebugError(error)
   );
 }
@@ -47,29 +53,43 @@ async function verifySteamOpenId(verifyBody: URLSearchParams): Promise<OpenIdVer
   const attempts = steamOpenidVerifyAttempts();
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const startedAt = Date.now();
     try {
-      const res = await fetch(STEAM_OPENID_ENDPOINT, {
-        method: "POST",
-        body: verifyBody,
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      const verifyUrl = `${STEAM_OPENID_ENDPOINT}?${verifyBody.toString()}`;
+      const res = await fetch(verifyUrl, {
+        method: "GET",
         cache: "no-store",
         signal: AbortSignal.timeout(timeoutMs),
       });
       const text = await res.text();
+      const ms = Date.now() - startedAt;
       const isValid = res.ok && /is_valid\s*:\s*true/i.test(text);
-      if (isValid) return { ok: true };
+      if (isValid) {
+        logDebug("auth.callback.openid_check_ok", {
+          attempt,
+          attempts,
+          timeoutMs,
+          status: res.status,
+          ms,
+        });
+        return { ok: true };
+      }
       if (res.status >= 500 && attempt < attempts) {
         logDebug("auth.callback.openid_check_retry", {
           attempt,
           attempts,
           timeoutMs,
           status: res.status,
+          ms,
         });
         continue;
       }
       logDebug("auth.callback.invalid_sig", {
         status: res.status,
         hasText: text.length > 0,
+        hasIsValid: /is_valid/i.test(text),
+        responseIsHtml: /^\s*<!DOCTYPE html>/i.test(text),
+        ms,
       });
       return { ok: false, failure: "invalid_sig" };
     } catch (error) {
@@ -77,6 +97,7 @@ async function verifySteamOpenId(verifyBody: URLSearchParams): Promise<OpenIdVer
         attempt,
         attempts,
         timeoutMs,
+        ms: Date.now() - startedAt,
         error: sanitizeDebugError(error),
       });
       if (attempt < attempts && isRetryableOpenIdFetchError(error)) {
@@ -87,6 +108,12 @@ async function verifySteamOpenId(verifyBody: URLSearchParams): Promise<OpenIdVer
   }
 
   return { ok: false, failure: "openid_timeout" };
+}
+
+function redirectNoStore(url: string): NextResponse {
+  return NextResponse.redirect(url, {
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 function collectSignedParams(params: URLSearchParams): URLSearchParams {
@@ -114,13 +141,13 @@ export async function GET(req: NextRequest) {
   });
   if (params.get("openid.mode") !== "id_res") {
     logDebug("auth.callback.bad_mode", { mode: params.get("openid.mode") ?? undefined });
-    return NextResponse.redirect(`${origin}/auth/error?reason=bad_mode`);
+    return redirectNoStore(`${origin}/auth/error?reason=bad_mode`);
   }
 
   const verifyBody = collectSignedParams(params);
   const verified = await verifySteamOpenId(verifyBody);
   if (!verified.ok) {
-    return NextResponse.redirect(`${origin}/auth/error?reason=${verified.failure}`);
+    return redirectNoStore(`${origin}/auth/error?reason=${verified.failure}`);
   }
 
   const claimedId = params.get("openid.claimed_id") ?? "";
@@ -129,7 +156,7 @@ export async function GET(req: NextRequest) {
     logDebug("auth.callback.no_steam_id", {
       claimedIdLength: claimedId.length,
     });
-    return NextResponse.redirect(`${origin}/auth/error?reason=no_steam_id`);
+    return redirectNoStore(`${origin}/auth/error?reason=no_steam_id`);
   }
 
   const current = await getSteamSession();
@@ -171,5 +198,5 @@ export async function GET(req: NextRequest) {
     redirectCalendar: true,
     cookieSecure: shouldUseSecureSessionCookie(req.headers),
   });
-  return NextResponse.redirect(`${origin}/calendar`);
+  return redirectNoStore(`${origin}/calendar`);
 }

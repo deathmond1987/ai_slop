@@ -139,6 +139,38 @@ export interface WishlistCacheResultLike {
   details?: WishlistCacheDetailsEntryLike[];
 }
 
+export function wishlistAppIdSetFromCacheResult(
+  result: WishlistCacheResultLike | undefined
+): Set<number> {
+  const appids = new Set<number>();
+
+  for (const item of result?.items ?? []) {
+    const appid = Number(item?.appid);
+    if (Number.isFinite(appid) && appid > 0) appids.add(appid);
+  }
+
+  for (const entry of result?.details ?? []) {
+    const appid = Number(entry?.appid);
+    if (Number.isFinite(appid) && appid > 0) appids.add(appid);
+  }
+
+  return appids;
+}
+
+export function filterWishlistPriceCandidatesByCurrentWishlist(
+  candidates: WishlistPriceCandidate[],
+  currentWishlistAppids: Set<number> | undefined
+): WishlistPriceCandidate[] {
+  if (currentWishlistAppids === undefined) return candidates;
+
+  return candidates.filter((candidate) => {
+    if (!candidate.sources?.includes("wishlist")) return true;
+
+    const appid = Number(candidate.appid);
+    return Number.isFinite(appid) && appid > 0 && currentWishlistAppids.has(appid);
+  });
+}
+
 function knownDateSource(value: DateSource | undefined): value is DateSource {
   return Boolean(value && value !== "unknown");
 }

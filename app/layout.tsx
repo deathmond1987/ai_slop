@@ -26,9 +26,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const wishlistTotal = signedIn
     ? await getWishlistTotalForSession(session, { refresh: false })
     : undefined;
+  const headerWishlistTotal = wishlistTotal?.ready
+    ? { ...wishlistTotal, items: [], discounts: [] }
+    : wishlistTotal;
   return (
     <html
       lang={lang}
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -39,7 +43,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
           displayName={session?.displayName}
           avatar={session?.avatar}
           storeCc={session?.storeCc}
-          initialTotal={wishlistTotal}
+          initialTotal={headerWishlistTotal}
         />
         <main className="app-shell flex-1 px-3 py-3">{children}</main>
         <footer className="text-center text-scale-10 opacity-60 py-2">
