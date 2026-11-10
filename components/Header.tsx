@@ -52,6 +52,11 @@ export function Header({
           label={t("header.wishlistTotal")}
           refreshKey={storeCc}
           initialTotal={initialTotal}
+          refreshLabel={t("wishlist.refresh")}
+          refreshingLabel={t("wishlist.refreshing")}
+          calculatingLabel={t("wishlist.calculating")}
+          privateLabel={t("error.wishlistHidden")}
+          unavailableLabel={t("wishlist.unavailable")}
         />
         <form action="/auth/lang" method="post" className="flex items-center gap-1">
           <button

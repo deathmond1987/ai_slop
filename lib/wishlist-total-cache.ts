@@ -1,15 +1,24 @@
 import "server-only";
 
-import { upcomingCacheKey } from "./aggregate-cache";
-import { cacheGet } from "./cache-store";
+import { UPCOMING_CACHE_PREFIX, upcomingCacheKey } from "./aggregate-cache";
+import { cacheGet, deleteCacheByExactOrPrefix } from "./cache-store";
 import { todayISO } from "./calendar";
 import { logDebug } from "./debug";
 import { getOwnedGames } from "./steam";
-import { ownedCacheKey } from "./steam-core";
+import {
+  APP_DETAILS_CACHE_PREFIX,
+  OWNED_CACHE_PREFIX,
+  STEAM_PROFILE_CACHE_PREFIX,
+  ownedCacheKey,
+} from "./steam-core";
 import { normalizeSteamStoreCc } from "./store-cc";
 import { collectUpcoming, type UpcomingResult } from "./upcoming";
 import type { IdentifiedSession, SteamSession } from "./types";
-import { wishlistCacheKey, wishlistStoreCcHash } from "./wishlist-cache-core";
+import {
+  WISHLIST_CACHE_PREFIX,
+  wishlistCacheKey,
+  wishlistStoreCcHash,
+} from "./wishlist-cache-core";
 import { aggregateWishlistGuardReason, wishlistTotalGuardReason } from "./wishlist-core.ts";
 import { fetchWishlist, type WishlistResult } from "./wishlist";
 import {
@@ -41,6 +50,16 @@ function emptyTotal(items: WishlistTotalResponse["items"] = []): WishlistTotalRe
   };
 }
 
+
+async function clearWishlistTotalCaches(steamId: string): Promise<void> {
+  await Promise.all([
+    deleteCacheByExactOrPrefix(`${UPCOMING_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(APP_DETAILS_CACHE_PREFIX),
+    deleteCacheByExactOrPrefix(`${OWNED_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${STEAM_PROFILE_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${WISHLIST_CACHE_PREFIX}${steamId}`),
+  ]);
+}
 
 async function ownedAppIdsForSession(
   steamId: string,
@@ -91,14 +110,17 @@ function candidatesFromCaches(
 
 export async function getWishlistTotalForSession(
   session: SteamSession | null,
-  options: { refresh?: boolean } = {}
+  options: { refresh?: boolean; force?: boolean } = {}
 ): Promise<WishlistTotalResponse> {
   const steamId = session?.steamId;
   if (!session || !steamId) {
     return { ready: false, reason: "signed_out" };
   }
 
-  const refresh = options.refresh ?? false;
+  const refresh = options.refresh === true || options.force === true;
+  if (options.force === true) {
+    await clearWishlistTotalCaches(steamId);
+  }
   const normalizedStoreCc = normalizeSteamStoreCc(session.storeCc);
   const rawgKey = session.rawgApiKey ?? process.env.RAWG_API_KEY;
   const identifiedSession: IdentifiedSession = { ...session, steamId };
@@ -167,9 +189,9 @@ export async function getWishlistTotalForSession(
       return { ready: false, reason: "wishlist_failed" };
     }
 
-    const guardReason =
-      wishlistTotalGuardReason(wishlist) ??
-      (wishlist ? undefined : aggregateWishlistGuardReason(aggregate, wishlist));
+    const guardReason = wishlist
+      ? wishlistTotalGuardReason(wishlist)
+      : aggregateWishlistGuardReason(aggregate, wishlist);
     if (guardReason) {
       logDebug("wishlistTotal.guard", {
         steamId,
