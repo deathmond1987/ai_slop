@@ -19,6 +19,9 @@
     "docker:compose:logs": "docker compose logs -f app",
     "lint": "eslint",
     "test": "node --test --experimental-strip-types tests/*.test.ts",
+    "test:auth": "node --test --experimental-strip-types tests/auth-flow.test.ts",
+    "test:auth:render": "node --experimental-strip-types scripts/auth-render-test.mjs",
+    "test:auth:all": "npm run test:auth && npm run test:auth:render",
     "verify:calendar-session": "node --experimental-strip-types scripts/verify-calendar-session.ts",
     "measure:sqlite-latency": "node --experimental-strip-types scripts/measure-sqlite-latency.ts"
   },

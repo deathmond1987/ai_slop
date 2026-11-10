@@ -476,7 +476,7 @@ export async function getAppDetails(
 }
 
 export function extractSteamIdFromOpenId(claimedId: string): string | null {
-  const m = claimedId.match(/\/id\/(\d{17})$/) || claimedId.match(/(\d{17})$/);
+  const m = claimedId.match(/\/id\/(\d{17})\/?$/) || claimedId.match(/(\d{17})\/?$/);
   return m ? m[1] : null;
 }
 

@@ -143,7 +143,9 @@ export async function getWishlistTotalForSession(
       }
     }
 
-    if (refresh && !wishlistCheckedForRefresh) {
+    const shouldRefreshCaches = refresh && !wishlistCheckedForRefresh && !wishlist;
+
+    if (shouldRefreshCaches) {
       try {
         wishlist = await fetchWishlist(steamId, normalizedStoreCc, { refresh: true });
       } catch (error) {
@@ -183,7 +185,7 @@ export async function getWishlistTotalForSession(
       return { ready: false, reason: guardReason };
     }
 
-    const ownedAppIds = await ownedAppIdsForSession(steamId, session.apiKey, refresh);
+    const ownedAppIds = await ownedAppIdsForSession(steamId, session.apiKey, shouldRefreshCaches);
     const currentWishlistAppids = wishlist
       ? wishlistAppIdSetFromCacheResult(wishlist)
       : undefined;

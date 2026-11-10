@@ -8,3 +8,4 @@ npm run typegen
 npm run lint
 npx tsc --noEmit
 npm run build
+npm run test:auth:render

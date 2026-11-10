@@ -11,6 +11,9 @@ compose.yaml
 .env*
 !.env.example
 .session-secret*
+.tmp-validation
+.dev-debug.log
+.worktrees
 data
 node_modules
 npm-debug.log*

@@ -6,6 +6,12 @@ export const dynamic = "force-dynamic";
 
 export async function GET(): Promise<NextResponse> {
   const session = await getSteamSession();
-  const total = await getWishlistTotalForSession(session, { refresh: true });
-  return NextResponse.json(total);
+  const cached = await getWishlistTotalForSession(session, { refresh: false });
+
+  if (cached.ready || cached.reason !== "not_cached") {
+    return NextResponse.json(cached);
+  }
+
+  const refreshed = await getWishlistTotalForSession(session, { refresh: true });
+  return NextResponse.json(refreshed);
 }
