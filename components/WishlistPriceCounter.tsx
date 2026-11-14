@@ -41,6 +41,7 @@ export function WishlistPriceCounter({
   unavailableLabel?: string;
 }) {
   const pathname = usePathname();
+  const initialTotalReady = initialTotal?.ready === true;
   const [total, setTotal] = useState<WishlistTotalResponse | null>(initialTotal ?? null);
   const [discountsOpen, setDiscountsOpen] = useState(false);
   const [pending, setPending] = useState(Boolean(signedIn && !initialTotal?.ready));
@@ -106,7 +107,7 @@ export function WishlistPriceCounter({
   const totalReason = total?.reason;
 
   useEffect(() => {
-    if (!signedIn) return;
+    if (!signedIn || initialTotalReady) return;
     const timeout = setTimeout(() => {
       void loadTotalRef.current?.({});
     }, 0);
@@ -115,7 +116,7 @@ export function WishlistPriceCounter({
       loadIdRef.current += 1;
       inFlightRef.current = false;
     };
-  }, [signedIn]);
+  }, [signedIn, initialTotalReady]);
 
   useEffect(() => {
     if (!signedIn || refreshing || totalReady) return;

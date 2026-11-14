@@ -143,6 +143,7 @@ async function collectUpcomingUncached(
         concurrency: 3,
         priority: "low",
         storeCc: normalizedStoreCc,
+        steamId: session.steamId,
       }).catch((error) => {
         logDebug("upcoming.earlyDetails.failed", {
           requested: earlyAppids.length,
@@ -207,7 +208,10 @@ async function collectUpcomingUncached(
 
   const detailsStart = Date.now();
   const appids = selectDetailCandidates(candidates, today, normalizedStoreCc);
-  const fetchedDetails = await getAppDetails(appids, { storeCc: normalizedStoreCc });
+  const fetchedDetails = await getAppDetails(appids, {
+    storeCc: normalizedStoreCc,
+    steamId: session.steamId,
+  });
   logDebug("upcoming.phase.details", {
     requested: appids.length,
     ms: Date.now() - detailsStart,

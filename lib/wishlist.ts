@@ -22,6 +22,7 @@ import {
   isCacheableWishlistResult,
   needsWishlistAppDetails,
   wishlistApiAppidMap,
+  wishlistFetchTimeoutMs,
   wishlistFinalizeAppids,
   wishlistPageItemMap,
   wishlistResultStatus,
@@ -57,7 +58,6 @@ const UA =
 const API_BASE = "https://api.steampowered.com";
 const API_ORIGIN = "https://store.steampowered.com";
 const MAX_EXTRA_WISHLIST_METADATA = 250;
-const WISHLIST_FETCH_TIMEOUT_MS = 10000;
 
 async function fetchWishlistJsonMethod(
   steamId: string,
@@ -71,7 +71,7 @@ async function fetchWishlistJsonMethod(
         Accept: "application/json",
       },
       cache: "no-store",
-      signal: AbortSignal.timeout(WISHLIST_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(wishlistFetchTimeoutMs()),
     });
     const eresultHeader = res.headers.get("x-eresult");
     const eresult = eresultHeader === null ? null : Number(eresultHeader);
@@ -115,7 +115,7 @@ async function fetchWishlistApiMethod(
         Accept: "application/octet-stream",
       },
       cache: "no-store",
-      signal: AbortSignal.timeout(WISHLIST_FETCH_TIMEOUT_MS),
+      signal: AbortSignal.timeout(wishlistFetchTimeoutMs()),
     });
     const body = Buffer.from(await res.arrayBuffer());
     const eresultHeader = res.headers.get("x-eresult");
@@ -173,6 +173,16 @@ async function fetchWishlistApi(steamId: string): Promise<ApiWishlistResult> {
     };
   }
 
+  if (jsonCount !== null) {
+    const listRes = await fetchWishlistApiMethod(steamId, "GetWishlist");
+    return {
+      ok: listRes.ok,
+      private: listRes.private,
+      items: listRes.ok ? parseGetWishlistResponse(listRes.body) : [],
+      count: jsonCount,
+    };
+  }
+
   const [countRes, listRes] = await Promise.all([
     fetchWishlistApiMethod(steamId, "GetWishlistItemCount"),
     fetchWishlistApiMethod(steamId, "GetWishlist"),
@@ -189,6 +199,7 @@ async function finalizeApiWishlist(
   apiItems: ApiWishlistItem[],
   totalCount: number,
   pageItems: WishlistItem[],
+  steamId: string,
   storeCc?: string | null
 ): Promise<WishlistResult> {
   const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
@@ -203,6 +214,7 @@ async function finalizeApiWishlist(
       ? await getAppDetails(enrichAppids, {
           limit: Math.min(enrichAppids.length, MAX_EXTRA_WISHLIST_METADATA),
           storeCc: normalizedStoreCc,
+          steamId,
         })
       : new Map<number, AppDetails | null>();
 
@@ -322,6 +334,7 @@ async function fetchWishlistUncached(
       api.items,
       api.count ?? api.items.length,
       page.items,
+      steamId,
       storeCc
     );
     logDebug("wishlist.phase.finalize", {
@@ -342,7 +355,13 @@ async function fetchWishlistUncached(
       totalKnown: api.count ?? null,
     });
     const finalizeStart = Date.now();
-    const result = await finalizeApiWishlist(api.items, api.count ?? api.items.length, [], storeCc);
+    const result = await finalizeApiWishlist(
+      api.items,
+      api.count ?? api.items.length,
+      [],
+      steamId,
+      storeCc
+    );
     logDebug("wishlist.phase.finalize", {
       ms: Date.now() - finalizeStart,
       items: result.items.length,
@@ -391,7 +410,7 @@ async function fetchWishlistFromPage(steamId: string): Promise<WishlistResult> {
   const res = await fetch(url, {
     headers: { "User-Agent": UA, Accept: "text/html" },
     cache: "no-store",
-    signal: AbortSignal.timeout(WISHLIST_FETCH_TIMEOUT_MS),
+    signal: AbortSignal.timeout(wishlistFetchTimeoutMs()),
   });
 
   if (res.status === 401 || res.status === 402 || res.status === 403) {

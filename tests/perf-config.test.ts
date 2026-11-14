@@ -9,11 +9,21 @@ import {
   STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS,
   STEAM_APPDETAILS_MIN_INTERVAL_MS,
   STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS,
+  STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS,
+  STEAM_APPDETAILS_RETRY_QUEUE_MAX,
+  STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX,
   STEAM_APPDETAILS_TIMEOUT_MS,
   steamAppDetailsConcurrency,
+  steamAppDetailsDebugParamsEnabled,
+  steamAppDetailsDownloadParams,
   steamAppDetailsFallbackEnabled,
   steamAppDetailsFallbackTimeoutMs,
+  steamAppDetailsMaxAttempts,
   steamAppDetailsMinIntervalMs,
+  steamAppDetailsRetryEnabled,
+  steamAppDetailsRetryMaxAttempts,
+  steamAppDetailsRetryQueueMax,
+  steamAppDetailsRetrySteamIdsMax,
   steamAppDetailsTimeoutMs,
 } from "../lib/steam-core.ts";
 import {
@@ -188,3 +198,78 @@ test("wishlist page fallback handles private, empty, and failed API states", () 
     assert.equal(shouldFetchWishlistPage(failed), true);
   });
 });
+
+test("Steam appdetails retry config defaults are bounded", () => {
+  withEnv(
+    {
+      STEAM_APPDETAILS_FALLBACK: undefined,
+      STEAM_APPDETAILS_RETRY: undefined,
+      STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS: undefined,
+      STEAM_APPDETAILS_RETRY_QUEUE_MAX: undefined,
+      STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX: undefined,
+    },
+    () => {
+      assert.equal(steamAppDetailsRetryEnabled(), true);
+      assert.equal(steamAppDetailsRetryMaxAttempts(), STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS);
+      assert.equal(steamAppDetailsRetryQueueMax(), STEAM_APPDETAILS_RETRY_QUEUE_MAX);
+      assert.equal(steamAppDetailsRetrySteamIdsMax(), STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX);
+      assert.equal(steamAppDetailsMaxAttempts("US"), 2);
+      assert.equal(steamAppDetailsMaxAttempts(null), 3);
+    }
+  );
+});
+
+test("Steam appdetails retry max attempts follows fallback state", () => {
+  withEnv(
+    {
+      STEAM_APPDETAILS_FALLBACK: "false",
+      STEAM_APPDETAILS_RETRY: "true",
+      STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS: undefined,
+      STEAM_APPDETAILS_RETRY_QUEUE_MAX: "50",
+      STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX: "5",
+    },
+    () => {
+      assert.equal(steamAppDetailsFallbackEnabled(), false);
+      assert.equal(steamAppDetailsMaxAttempts("US"), 1);
+      assert.equal(steamAppDetailsMaxAttempts(null), 1);
+      assert.equal(steamAppDetailsRetryQueueMax(), 50);
+      assert.equal(steamAppDetailsRetrySteamIdsMax(), 5);
+    }
+  );
+});
+
+test("Steam appdetails download params hide debug state by default and expose when debug is enabled", () => {
+  withEnv(
+    {
+      APP_DEBUG: undefined,
+      DOWNLOAD_PARAMS_DEBUG: undefined,
+    },
+    () => {
+      assert.equal(steamAppDetailsDebugParamsEnabled(), false);
+      assert.equal(steamAppDetailsDownloadParams().debugEnabled, false);
+    }
+  );
+
+  withEnv(
+    {
+      APP_DEBUG: "true",
+      DOWNLOAD_PARAMS_DEBUG: undefined,
+    },
+    () => {
+      assert.equal(steamAppDetailsDebugParamsEnabled(), true);
+      assert.equal(steamAppDetailsDownloadParams().debugEnabled, true);
+    }
+  );
+
+  withEnv(
+    {
+      APP_DEBUG: undefined,
+      DOWNLOAD_PARAMS_DEBUG: "true",
+    },
+    () => {
+      assert.equal(steamAppDetailsDebugParamsEnabled(), true);
+      assert.equal(steamAppDetailsDownloadParams().debugEnabled, true);
+    }
+  );
+});
+

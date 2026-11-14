@@ -1,8 +1,16 @@
 import "server-only";
-import { cacheGet, cacheSet } from "./cache-store";
+import { cacheGet, cacheSet, deleteCacheByExactOrPrefix } from "./cache-store";
 import { logDebug, sanitizeDebugError, sanitizeDebugText } from "./debug";
 import { loadWithCacheAndDedupe } from "./cached-dedupe.ts";
+import {
+  configureAppDetailsRetry,
+  enqueueAppDetailsRetry,
+  type AppDetailsRetryOutcome,
+  type AppDetailsRetryRequest,
+} from "./app-details-retry.ts";
+import { UPCOMING_CACHE_PREFIX } from "./aggregate-cache.ts";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
+import { WISHLIST_CACHE_PREFIX } from "./wishlist-cache-core.ts";
 import type { SteamPriceOverview } from "./types";
 import {
   appDetailsCacheKey,
@@ -15,9 +23,13 @@ import {
   OWNED_TTL_MS,
   parseSteamProfileHtml,
   steamAppDetailsConcurrency,
+  steamAppDetailsDownloadParams,
   steamAppDetailsFallbackEnabled,
   steamAppDetailsFallbackTimeoutMs,
+  steamAppDetailsDebugParamsEnabled,
+  steamAppDetailsMaxAttempts,
   steamAppDetailsMinIntervalMs,
+  steamAppDetailsRetryEnabled,
   steamAppDetailsTimeoutMs,
   steamFetchTimeoutMs,
   steamProfileCacheKey,
@@ -411,13 +423,20 @@ async function fetchAppDetails(
   return finish(sawTransientFetchFailure && !sawConfirmedNegative ? APP_DETAILS_TRANSIENT_MISS : null);
 }
 
-async function loadAppDetails(
+function normalizeSteamId(steamId?: string | null): string | undefined {
+  if (typeof steamId !== "string") return undefined;
+  const normalized = steamId.trim();
+  if (!normalized || !/^\d{15,20}$/.test(normalized)) return undefined;
+  return normalized;
+}
+
+async function loadAppDetailsRaw(
   appid: number,
   priority: AppDetailsPriority = "normal",
   storeCc?: string | null
-): Promise<AppDetails | null> {
+): Promise<AppDetails | null | AppDetailsTransientMiss> {
   const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
-  const details = await loadWithCacheAndDedupe({
+  return loadWithCacheAndDedupe({
     cacheKey: appDetailsCacheKey(appid, normalizedStoreCc),
     pending: pendingAppDetails,
     factory: () => fetchAppDetails(appid, priority, normalizedStoreCc),
@@ -425,8 +444,58 @@ async function loadAppDetails(
     cacheGet,
     cacheSet,
   });
+}
 
-  return isTransientAppDetailsCache(details) ? null : details;
+async function retryAppDetails(request: AppDetailsRetryRequest): Promise<AppDetailsRetryOutcome> {
+  const details = await loadAppDetailsRaw(request.appid, "low", request.storeCc);
+  return isTransientAppDetailsCache(details) ? "retry" : "succeeded";
+}
+
+async function onAppDetailsRetrySucceeded(request: AppDetailsRetryRequest): Promise<void> {
+  const steamId = normalizeSteamId(request.steamId);
+  if (!steamId) return;
+
+  await Promise.all([
+    deleteCacheByExactOrPrefix(`${UPCOMING_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${WISHLIST_CACHE_PREFIX}${steamId}`),
+  ]);
+  logDebug("steam.appdetails.retry_succeeded", { appid: request.appid, hasSteamId: true });
+}
+
+export function configureSteamAppDetailsRetry(): void {
+  configureAppDetailsRetry({
+    retry: retryAppDetails,
+    onSucceeded: onAppDetailsRetrySucceeded,
+  });
+}
+
+function scheduleAppDetailsRetry(request: AppDetailsRetryRequest): void {
+  if (!steamAppDetailsRetryEnabled()) return;
+  enqueueAppDetailsRetry(request);
+}
+
+async function loadAppDetails(
+  appid: number,
+  priority: AppDetailsPriority = "normal",
+  storeCc?: string | null,
+  steamId?: string | null
+): Promise<AppDetails | null> {
+  const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
+  const details = await loadAppDetailsRaw(appid, priority, normalizedStoreCc);
+
+  if (isTransientAppDetailsCache(details)) {
+    const normalizedSteamId = normalizeSteamId(steamId);
+    if (priority !== "low" && normalizedSteamId) {
+      scheduleAppDetailsRetry({
+        appid,
+        storeCc: normalizedStoreCc,
+        steamId: normalizedSteamId,
+      });
+    }
+    return null;
+  }
+
+  return details;
 }
 
 export async function getAppDetails(
@@ -436,6 +505,7 @@ export async function getAppDetails(
     limit?: number;
     priority?: AppDetailsPriority;
     storeCc?: string | null;
+    steamId?: string | null;
   } = {}
 ): Promise<Map<number, AppDetails | null>> {
   const out = new Map<number, AppDetails | null>();
@@ -445,6 +515,9 @@ export async function getAppDetails(
   const concurrency = Math.max(1, Math.min(options.concurrency ?? steamAppDetailsConcurrency(), 10));
   const priority = options.priority ?? "normal";
   const normalizedStoreCc = normalizeSteamStoreCc(options.storeCc);
+  const normalizedSteamId = normalizeSteamId(options.steamId);
+  const maxAttempts = steamAppDetailsMaxAttempts(normalizedStoreCc);
+  const downloadParams = steamAppDetailsDebugParamsEnabled() ? steamAppDetailsDownloadParams() : undefined;
   let cursor = 0;
 
   logDebug("steam.getAppDetails.start", {
@@ -453,12 +526,15 @@ export async function getAppDetails(
     concurrency,
     priority,
     hasStoreCc: Boolean(normalizedStoreCc),
+    hasSteamId: Boolean(normalizedSteamId),
+    maxAttempts,
+    downloadParams,
   });
 
   async function worker(): Promise<void> {
     while (cursor < targets.length) {
       const id = targets[cursor++];
-      const cached = await loadAppDetails(id, priority, normalizedStoreCc);
+      const cached = await loadAppDetails(id, priority, normalizedStoreCc, normalizedSteamId);
       out.set(id, cached);
     }
   }
@@ -474,6 +550,8 @@ export async function getAppDetails(
 
   return out;
 }
+
+configureSteamAppDetailsRetry();
 
 export function extractSteamIdFromOpenId(claimedId: string): string | null {
   const m = claimedId.match(/\/id\/(\d{17})\/?$/) || claimedId.match(/(\d{17})\/?$/);

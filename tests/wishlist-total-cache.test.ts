@@ -61,9 +61,10 @@ test("refreshing wishlist total removes stale wishlist candidates removed from S
   };
 
   try {
-    const { cacheSet } = await import("../lib/cache-store.ts");
+    const { cacheGet, cacheSet } = await import("../lib/cache-store.ts");
     const { todayISO } = await import("../lib/calendar.ts");
     const { upcomingCacheKey, upcomingCacheTtlMs } = await import("../lib/aggregate-cache.ts");
+    const { APP_DETAILS_CACHE_PREFIX } = await import("../lib/steam-core.ts");
     const { getWishlistTotalForSession } = await import("../lib/wishlist-total-cache.ts");
 
     const steamId = "10000000000000001";
@@ -111,7 +112,18 @@ test("refreshing wishlist total removes stale wishlist candidates removed from S
       upcomingCacheTtlMs()
     );
 
-    const result = await getWishlistTotalForSession(session, { refresh: true });
+    await cacheSet(
+      `${APP_DETAILS_CACHE_PREFIX}100`,
+      { success: true, data: { name: "Stale Game" } },
+      upcomingCacheTtlMs()
+    );
+    await cacheSet(
+      `${APP_DETAILS_CACHE_PREFIX}300`,
+      { success: true, data: { name: "Unrelated Game" } },
+      upcomingCacheTtlMs()
+    );
+
+    const result = await getWishlistTotalForSession(session, { force: true });
 
     assert.equal(result.ready, true);
     assert.equal(result.count, 1);
@@ -119,6 +131,8 @@ test("refreshing wishlist total removes stale wishlist candidates removed from S
     assert.equal(result.currency, "eur");
     assert.equal(result.items?.some((item) => item.appid === 100), false);
     assert.deepEqual(result.items?.map((item) => item.appid), [200]);
+    assert.equal(await cacheGet(`${APP_DETAILS_CACHE_PREFIX}100`), undefined);
+    assert.ok(await cacheGet(`${APP_DETAILS_CACHE_PREFIX}300`));
   } finally {
     globalThis.fetch = originalFetch;
 

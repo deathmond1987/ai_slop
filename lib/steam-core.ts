@@ -25,6 +25,11 @@ export const STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS = 6000;
 export const STEAM_APPDETAILS_CONCURRENCY = 8;
 export const STEAM_APPDETAILS_MIN_INTERVAL_MS = 100;
 export const STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS = 5000;
+export const STEAM_APPDETAILS_RETRY_DEFAULT_ENABLED = true;
+export const STEAM_APPDETAILS_RETRY_DELAY_MS = 30_000;
+export const STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS = 2;
+export const STEAM_APPDETAILS_RETRY_QUEUE_MAX = 500;
+export const STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX = 20;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -77,6 +82,88 @@ export function steamAppDetailsMinIntervalMs(): number {
     STEAM_APPDETAILS_MIN_INTERVAL_MS
   );
   return Math.min(interval, STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS);
+}
+
+export function steamAppDetailsRetryEnabled(): boolean {
+  return parseBoolean(process.env.STEAM_APPDETAILS_RETRY, STEAM_APPDETAILS_RETRY_DEFAULT_ENABLED);
+}
+
+export function steamAppDetailsRetryDelayMs(): number {
+  return parsePositiveInt(process.env.STEAM_APPDETAILS_RETRY_DELAY_MS, STEAM_APPDETAILS_RETRY_DELAY_MS);
+}
+
+export function steamAppDetailsRetryMaxAttempts(): number {
+  const maxAttempts = parsePositiveInt(
+    process.env.STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS,
+    STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS
+  );
+  return Math.max(1, Math.min(maxAttempts, 5));
+}
+
+export function steamAppDetailsRetryQueueMax(): number {
+  const queueMax = parsePositiveInt(process.env.STEAM_APPDETAILS_RETRY_QUEUE_MAX, STEAM_APPDETAILS_RETRY_QUEUE_MAX);
+  return Math.max(1, Math.min(queueMax, 2000));
+}
+
+export function steamAppDetailsRetrySteamIdsMax(): number {
+  const steamIdsMax = parsePositiveInt(
+    process.env.STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX,
+    STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX
+  );
+  return Math.max(1, Math.min(steamIdsMax, 100));
+}
+
+export function steamAppDetailsMaxAttempts(storeCc?: string | null | undefined): number {
+  if (!steamAppDetailsFallbackEnabled()) return 1;
+  return normalizeSteamStoreCc(storeCc) ? 2 : 3;
+}
+
+export function steamAppDetailsDebugParamsEnabled(): boolean {
+  return parseBoolean(process.env.DOWNLOAD_PARAMS_DEBUG, parseBoolean(process.env.APP_DEBUG, false));
+}
+
+export interface SteamAppDetailsDownloadParams {
+  concurrency: number;
+  timeoutMs: number;
+  fallbackEnabled: boolean;
+  fallbackTimeoutMs: number;
+  minIntervalMs: number;
+  minIntervalMaxMs: number;
+  maxAttemptsWhenStoreCcPresent: number;
+  maxAttemptsWhenStoreCcMissing: number;
+  negativeTtlMs: number;
+  volatileTtlMs: number;
+  retryEnabled: boolean;
+  retryDelayMs: number;
+  retryMaxAttempts: number;
+  retryQueueMax: number;
+  retrySteamIdsMax: number;
+  debugEnabled: boolean;
+}
+
+export function steamAppDetailsDownloadParams(): SteamAppDetailsDownloadParams {
+  const fallbackEnabled = steamAppDetailsFallbackEnabled();
+  const maxAttemptsWhenStoreCcPresent = fallbackEnabled ? 2 : 1;
+  const maxAttemptsWhenStoreCcMissing = fallbackEnabled ? 3 : 1;
+
+  return {
+    concurrency: steamAppDetailsConcurrency(),
+    timeoutMs: steamAppDetailsTimeoutMs(),
+    fallbackEnabled,
+    fallbackTimeoutMs: steamAppDetailsFallbackTimeoutMs(),
+    minIntervalMs: steamAppDetailsMinIntervalMs(),
+    minIntervalMaxMs: STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS,
+    maxAttemptsWhenStoreCcPresent,
+    maxAttemptsWhenStoreCcMissing,
+    negativeTtlMs: APP_DETAILS_NEGATIVE_TTL_MS,
+    volatileTtlMs: APP_DETAILS_VOLATILE_TTL_MS,
+    retryEnabled: steamAppDetailsRetryEnabled(),
+    retryDelayMs: steamAppDetailsRetryDelayMs(),
+    retryMaxAttempts: steamAppDetailsRetryMaxAttempts(),
+    retryQueueMax: steamAppDetailsRetryQueueMax(),
+    retrySteamIdsMax: steamAppDetailsRetrySteamIdsMax(),
+    debugEnabled: steamAppDetailsDebugParamsEnabled(),
+  };
 }
 
 const YEAR_ONLY_RE = /^\d{4}$/;

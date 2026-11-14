@@ -1,7 +1,7 @@
 import "server-only";
 
 import { UPCOMING_CACHE_PREFIX, upcomingCacheKey } from "./aggregate-cache";
-import { cacheGet, deleteCacheByExactOrPrefix } from "./cache-store";
+import { cacheGet, deleteCacheByExactOrPrefix, listCacheEntriesByExactOrPrefix } from "./cache-store";
 import { todayISO } from "./calendar";
 import { logDebug } from "./debug";
 import { getOwnedGames } from "./steam";
@@ -51,10 +51,45 @@ function emptyTotal(items: WishlistTotalResponse["items"] = []): WishlistTotalRe
 }
 
 
+function addCachedAppid(appids: Set<number>, value: unknown): void {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    appids.add(value);
+  }
+}
+
+function addUpcomingAppids(appids: Set<number>, result: UpcomingResult): void {
+  for (const game of result.games ?? []) {
+    addCachedAppid(appids, game.appid);
+    addCachedAppid(appids, game.fullgame?.appid);
+  }
+}
+
+function addWishlistAppids(appids: Set<number>, result: WishlistResult): void {
+  for (const item of result.items ?? []) {
+    addCachedAppid(appids, item.appid);
+  }
+  for (const entry of result.details ?? []) {
+    addCachedAppid(appids, entry.appid);
+  }
+}
+
 async function clearWishlistTotalCaches(steamId: string): Promise<void> {
+  const [aggregateEntries, wishlistEntries] = await Promise.all([
+    listCacheEntriesByExactOrPrefix<UpcomingResult>(`${UPCOMING_CACHE_PREFIX}${steamId}`),
+    listCacheEntriesByExactOrPrefix<WishlistResult>(`${WISHLIST_CACHE_PREFIX}${steamId}`),
+  ]);
+
+  const appids = new Set<number>();
+  for (const entry of aggregateEntries) {
+    addUpcomingAppids(appids, entry.value);
+  }
+  for (const entry of wishlistEntries) {
+    addWishlistAppids(appids, entry.value);
+  }
+
   await Promise.all([
     deleteCacheByExactOrPrefix(`${UPCOMING_CACHE_PREFIX}${steamId}`),
-    deleteCacheByExactOrPrefix(APP_DETAILS_CACHE_PREFIX),
+    ...[...appids].map((appid) => deleteCacheByExactOrPrefix(`${APP_DETAILS_CACHE_PREFIX}${appid}`)),
     deleteCacheByExactOrPrefix(`${OWNED_CACHE_PREFIX}${steamId}`),
     deleteCacheByExactOrPrefix(`${STEAM_PROFILE_CACHE_PREFIX}${steamId}`),
     deleteCacheByExactOrPrefix(`${WISHLIST_CACHE_PREFIX}${steamId}`),

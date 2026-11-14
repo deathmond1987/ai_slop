@@ -2,6 +2,11 @@ import "server-only";
 import { logDebug } from "./debug";
 import { getStatementRow, prepare, runStatement } from "./sqlite";
 
+export interface CacheEntry<T> {
+  key: string;
+  value: T;
+}
+
 const PRUNE_INTERVAL_MS = 60_000;
 const SELECT_SQL = "SELECT value FROM cache_entries WHERE key = ? AND expires_at > ?";
 const UPSERT_SQL = `INSERT INTO cache_entries (key, value, expires_at, updated_at)
@@ -15,6 +20,8 @@ const PRUNE_SQL = "DELETE FROM cache_entries WHERE expires_at <= ?";
 const DELETE_BY_PREFIX_SQL = "DELETE FROM cache_entries WHERE key LIKE ? ESCAPE '\\'";
 const DELETE_BY_EXACT_OR_PREFIX_SQL =
   "DELETE FROM cache_entries WHERE key = ? OR key LIKE ? ESCAPE '\\'";
+const LIST_BY_EXACT_OR_PREFIX_SQL =
+  "SELECT key, value FROM cache_entries WHERE (key = ? OR key LIKE ? ESCAPE '\\') AND expires_at > ?";
 
 let lastPruneAt = 0;
 
@@ -107,5 +114,44 @@ export async function deleteCacheByExactOrPrefix(prefix: string): Promise<boolea
       error: String(error),
     });
     return false;
+  }
+}
+
+export async function listCacheEntriesByExactOrPrefix<T>(
+  prefix: string
+): Promise<CacheEntry<T>[]> {
+  if (!prefix) return [];
+
+  pruneExpired();
+
+  const escapedPrefix = escapeLikePattern(prefix);
+  const likePattern = `${escapedPrefix}:%`;
+  const statement = await prepare(LIST_BY_EXACT_OR_PREFIX_SQL);
+  if (!statement) return [];
+
+  try {
+    const rows = statement.all(prefix, likePattern, Date.now()) as {
+      key?: unknown;
+      value?: unknown;
+    }[];
+    const entries: CacheEntry<T>[] = [];
+    for (const row of rows) {
+      if (typeof row.key !== "string" || typeof row.value !== "string") continue;
+      try {
+        entries.push({ key: row.key, value: JSON.parse(row.value) as T });
+      } catch (error) {
+        logDebug("cacheStore.list.parse_failed", {
+          key: row.key,
+          error: String(error),
+        });
+      }
+    }
+    return entries;
+  } catch (error) {
+    logDebug("cacheStore.listByExactOrPrefix.failed", {
+      prefix,
+      error: String(error),
+    });
+    return [];
   }
 }

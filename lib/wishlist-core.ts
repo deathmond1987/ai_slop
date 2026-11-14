@@ -42,6 +42,7 @@ export interface WishlistResultStatusLike {
 
 const STEAM_ASSET_BASE = "https://shared.fastly.steamstatic.com/store_item_assets/";
 export const WISHLIST_PAGE_FALLBACK_DEFAULT_ENABLED = false;
+export const WISHLIST_FETCH_TIMEOUT_DEFAULT_MS = 10000;
 
 function parseWishlistBooleanEnv(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
@@ -51,10 +52,23 @@ function parseWishlistBooleanEnv(value: string | undefined, fallback: boolean): 
   return fallback;
 }
 
+function parseWishlistTimeoutEnv(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value.trim());
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function wishlistPageFallbackEnabled(): boolean {
   return parseWishlistBooleanEnv(
     process.env.WISHLIST_PAGE_FALLBACK_ENABLED,
     WISHLIST_PAGE_FALLBACK_DEFAULT_ENABLED
+  );
+}
+
+export function wishlistFetchTimeoutMs(): number {
+  return parseWishlistTimeoutEnv(
+    process.env.WISHLIST_FETCH_TIMEOUT_MS,
+    WISHLIST_FETCH_TIMEOUT_DEFAULT_MS
   );
 }
 
