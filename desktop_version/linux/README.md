@@ -112,8 +112,7 @@ npm run build:linux
 This wrapper runs:
 
 1. `scripts/desktop/build-linux-docker.sh`: builds `steam-calendar-linux-build:latest` from `desktop_version/linux/Dockerfile.build`.
-2. `scripts/desktop/export-linux-packages.sh`: copies normalized Linux artifacts from the build image into `out/linux`.
-3. `scripts/desktop/build-arch-package.sh`: converts the exported `.deb` into an Arch Linux package using `archlinux:latest`.
+2. `scripts/desktop/export-linux-packages.sh`: copies normalized `.deb`, `.rpm` and AppImage artifacts from the build image into `out/linux`, then converts the exported `.deb` into an Arch Linux package using `archlinux:latest`.
 
 The expected artifacts are:
 

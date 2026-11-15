@@ -112,13 +112,13 @@
 - Docker image публикуется как `ghcr.io/<owner>/steam-calendar` с тегами version, major.minor, major, SHA и опциональным `latest`.
 - При `prerelease=true` или при версии вида `1.2.3-beta.1` GitHub release помечается pre-release и Docker tag `latest` не публикуется.
 - Desktop-пакеты собираются через существующие Docker-скрипты:
-  - Linux `.deb`, `.rpm`, AppImage;
+  - Linux `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst` в одной Linux task;
   - Windows NSIS setup `.exe`.
 - При `publish_release=true` workflow собирает desktop-пакеты и публикует их как GitHub release assets с тегом `v<version>`.
 
 ## Новая фаза: 11 изменений
 
-**Проверка:** `npm run check` пройден: `152` tests pass, typegen/lint/build/auth render fallback passed; Docker workflow parsed and contains shared base, Linux/Windows builder, parallel export jobs and release dependencies.
+**Проверка:** `npm run check` пройден: `152` tests pass, typegen/lint/build/auth render fallback passed; Docker workflow parsed and contains `docker`, `desktop` matrix jobs with Linux/Windows tasks and release dependencies.
 
 ### 1. Переименовать настройки темы интерфейса
 
@@ -202,13 +202,10 @@
 
 ### 11. Оптимизировать пайплайн сборки
 
-**Статус:** выполнено на уровне workflow и вспомогательных скриптов; `.github/workflows/docker.yml` сначала выполняет `preflight` и `checks`, затем `desktop-base`, затем Linux/Windows builder и export jobs для `.deb` (Debian/Ubuntu), `.rpm` (RHEL/Fedora), Arch `.pkg.tar.zst` (Arch Linux), universal AppImage и Windows installer; реальная публикация GitHub Actions/GHCR через `Run workflow` в этом окружении не проверялась.
+**Статус:** пайплайн упрощен: `.github/workflows/docker.yml` выполняет `preflight`, `checks`, отдельную job `docker` для production Docker-контейнера, desktop matrix с задачами `linux` и `windows`, затем `release`. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Отдельные builder/export jobs и публикация desktop builder-образов в GHCR убраны; проверка реального GitHub Actions runs продолжается после повторного запуска.
 
-- Сначала выполнить базовые проверки и собрать общий базовый слой/образ.
-- Затем собирать desktop-артефакты через отдельные jobs:
-  - `.deb` для Debian/Ubuntu;
-  - `.rpm` для RHEL/Fedora;
-  - `.pkg.tar.zst` для Arch Linux;
-  - universal AppImage;
-  - Windows installer.
-- Не запускать лишние повторные дорогие шаги для каждой платформы там, где можно переиспользовать общую базу.
+- Production Docker-контейнер собирается в отдельной job `docker` при `publish_docker=true`.
+- Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`.
+- Linux task в одном job собирает `desktop-linux-packages`: `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst`.
+- Windows task в одном job собирает `desktop-windows-packages`.
+- Не запускать лишние отдельные builder/export jobs и не публиковать desktop builder images в GHCR.

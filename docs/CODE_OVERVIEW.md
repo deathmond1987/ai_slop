@@ -133,7 +133,7 @@ Diagnostic/verification script для проверки upcoming/calendar candida
 - `build/linux.sh`: builds Linux desktop artifacts into `out/linux`.
 - `build/windows.sh`: builds the Windows NSIS installer into `out/windows`.
 - `scripts/desktop/build-linux-docker.sh`: builds the Linux desktop packaging image.
-- `scripts/desktop/export-linux-packages.sh`: exports Linux `.deb`, `.rpm` and AppImage artifacts into `out/linux`.
+- `scripts/desktop/export-linux-packages.sh`: exports Linux `.deb`, `.rpm`, AppImage and Arch `.pkg.tar.zst` artifacts into `out/linux`; `EXPORT_KIND=all` runs the full Linux packaging flow in one task.
 - `scripts/desktop/build-arch-package.sh`: converts the exported `.deb` into an Arch package and optionally verifies it.
 - `scripts/desktop/build-windows-docker.sh`: builds the Windows cross-build image using `cargo-xwin` and NSIS.
 - `scripts/desktop/export-windows-packages.sh`: exports the NSIS installer into `out/windows`.
@@ -148,8 +148,9 @@ Workflow "Publish release by button":
 - `checks` job выполняет `npm ci` и `npm run check`;
 - `docker` job по input `publish_docker` собирает и публикует image `ghcr.io/<owner>/steam-calendar`;
 - Docker tags для ручной публикации: exact version, `major.minor`, `major`, `sha-<short-sha>`, и `latest` только если `publish_latest=true` и `prerelease=false`;
-- `desktop-base`, `desktop-linux-builder` и `desktop-windows-builder` job по input `publish_release` публикуют базовый desktop image и builder images в GHCR;
-- export jobs по input `publish_release` собирают артефакты: `desktop-linux-deb-packages` для Debian/Ubuntu `.deb`, `desktop-linux-rpm-packages` для RHEL/Fedora `.rpm`, `desktop-linux-appimage-packages` для universal AppImage, `desktop-arch-packages` для Arch Linux `.pkg.tar.zst`, `desktop-windows-packages` для Windows NSIS setup `.exe`;
+- `desktop` job по input `publish_release` использует matrix `linux`/`windows`; desktop builder images собираются локально внутри этих задач и не публикуются в GHCR;
+- Linux desktop task собирает все Linux-пакеты одной задачей в `desktop-linux-packages`: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и Arch Linux `.pkg.tar.zst` из `out/linux`;
+- Windows desktop task собирает `desktop-windows-packages` для Windows NSIS setup `.exe` из `out/windows`;
 - `release` job по input `publish_release` скачивает desktop artifacts, создает или обновляет GitHub release и загружает desktop-пакеты как release assets;
 - summary job пишет release URL.
 

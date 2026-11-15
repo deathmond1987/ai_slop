@@ -346,7 +346,7 @@ docker run --rm \
 
 Workflow `.github/workflows/docker.yml` называется `Publish release by button` и запускается только вручную через `workflow_dispatch` (кнопка `Run workflow`). Автоматическая сборка на push, на тег `v*` и на pull request отключена.
 
-Workflow делает проверки `npm ci && npm run check`, разрешает версию релиза через `scripts/version.mjs`, затем по выбранным кнопкой input-параметрам может собрать Docker image и desktop-пакеты.
+Workflow делает проверки `npm ci && npm run check`, разрешает версию релиза через `scripts/version.mjs`, затем по выбранным кнопкой input-параметрам может собрать production Docker image в job `docker` и desktop-пакеты в job `desktop`.
 
 Приоритет разрешения версии: переданный `version`/env-переменные, exact git tag на текущем commit, затем `package.json`. Для git tag workflow использует checkout с полной историей тегов.
 
@@ -395,13 +395,12 @@ https://github.com/<owner>/steam-calendar/pkgs/container/steam-calendar
 
 ### Публикация desktop-релизов по кнопке
 
-Если включен input `publish_release`, workflow собирает desktop-артефакты через существующие Docker-скрипты:
+Если включен input `publish_release`, workflow собирает desktop-артефакты через две matrix-задачи на основе существующих Docker-скриптов:
 
-- `.deb` для Debian/Ubuntu из `out/linux`;
-- `.rpm` для RHEL/Fedora из `out/linux`;
-- AppImage как universal Linux-пакет из `out/linux`;
-- `.pkg.tar.zst` для Arch Linux из `out/arch`;
-- Windows: NSIS setup `.exe` из `out/windows`.
+- `linux`: одна задача собирает все Linux-пакеты в `out/linux` — `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux;
+- `windows`: отдельная задача собирает NSIS setup `.exe` в `out/windows`.
+
+Отдельные builder/export jobs и публикация builder-образов в GHCR для desktop-пакетов не используются. Desktop builder images собираются локально внутри нужной matrix-задачи.
 
 После сборки workflow создает GitHub release с тегом `v<version>` и загружает эти файлы как release assets. Если релиз с таким тегом уже существует, assets обновляются с `--clobber`, а title и notes перезаписываются.
 

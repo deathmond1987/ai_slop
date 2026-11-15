@@ -30,6 +30,7 @@ case "$EXPORT_KIND" in
     rm -rf "${OUT_DIR:?}/steam-calendar_"*
     rm -f "$OUT_DIR"/*.rpm
     rm -f "$OUT_DIR"/*.AppImage
+    rm -f "$OUT_DIR"/*.pkg.tar.zst
     ;;
   deb)
     rm -f "$OUT_DIR"/*.deb
@@ -40,9 +41,12 @@ case "$EXPORT_KIND" in
   appimage)
     rm -f "$OUT_DIR"/*.AppImage
     ;;
+  arch)
+    rm -f "$OUT_DIR"/*.pkg.tar.zst
+    ;;
   *)
     echo "Unsupported EXPORT_KIND: $EXPORT_KIND" >&2
-    echo "Expected one of: all, deb, rpm, appimage" >&2
+    echo "Expected one of: all, deb, rpm, appimage, arch" >&2
     exit 1
     ;;
 esac
@@ -96,9 +100,19 @@ copy_bundle_if_kind deb "$BUNDLE_BASE/deb" "*.deb" "steam-calendar_${VERSION}_${
 copy_bundle_if_kind rpm "$BUNDLE_BASE/rpm" "*.rpm" "steam-calendar-${VERSION}-1.x86_64.rpm"
 copy_bundle_if_kind appimage "$BUNDLE_BASE/appimage" "*.AppImage" "steam-calendar_${VERSION}_${ARCH}.AppImage"
 
+if [ "$EXPORT_KIND" = "all" ] || [ "$EXPORT_KIND" = "arch" ]; then
+  deb_file="$(find "$OUT_DIR" -maxdepth 1 -type f -name 'steam-calendar_*.deb' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+  if [ -z "$deb_file" ]; then
+    echo "A Debian package is required before exporting an Arch package." >&2
+    echo "Run scripts/desktop/export-linux-packages.sh with EXPORT_KIND=all or EXPORT_KIND=deb first." >&2
+    exit 1
+  fi
+  VERIFY_ARCH="${VERIFY_ARCH:-0}" DEB_FILE="$deb_file" bash scripts/desktop/build-arch-package.sh
+fi
+
 case "$EXPORT_KIND" in
   all)
-    ls -lh "$OUT_DIR"/*.deb "$OUT_DIR"/*.rpm "$OUT_DIR"/*.AppImage
+    ls -lh "$OUT_DIR"/*.deb "$OUT_DIR"/*.rpm "$OUT_DIR"/*.AppImage "$OUT_DIR"/*.pkg.tar.zst
     ;;
   deb)
     ls -lh "$OUT_DIR"/*.deb
@@ -108,5 +122,8 @@ case "$EXPORT_KIND" in
     ;;
   appimage)
     ls -lh "$OUT_DIR"/*.AppImage
+    ;;
+  arch)
+    ls -lh "$OUT_DIR"/*.pkg.tar.zst
     ;;
 esac
