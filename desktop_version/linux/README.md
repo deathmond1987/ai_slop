@@ -12,7 +12,8 @@ The desktop app does not run Next.js inside the WebView. It starts a local Node.
 - `src-tauri/binaries/`: generated target-specific sidecar binary source. This folder is generated and ignored.
 - `.build/app/`: staged Next.js standalone app copied into the Tauri bundle as `app`.
 - `scripts/build-sidecar.mjs`: stages `.build/app`, copies the current Node executable to target-specific sidecar binary names, and copies a dev sidecar into `src-tauri/target/debug`.
-- `scripts/gen-icons.mjs`: generates PNG icons without external image tools.
+- `scripts/gen-icons.mjs`: regenerates desktop icons from `assets/app-icon.svg` using the bundled Tauri icon generator.
+- `assets/app-icon.svg`: source desktop icon combining Steam-style circular geometry with a calendar page along the diagonal.
 - `web/index.html`: Tauri shell page that polls sidecar status and redirects to the local app.
 - `Dockerfile.build`: validates the Linux build with Tauri webkit/GTK dependencies.
 
