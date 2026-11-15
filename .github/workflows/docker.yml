@@ -360,7 +360,7 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          release_url="$(gh release view "${TAG}" --json html_url --jq .html_url)"
+          release_url="$(gh release view "${TAG}" --json url --jq .url)"
           {
             printf '## Release\n\n'
             printf '[Steam Calendar %s](%s)\n\n' "${VERSION}" "${release_url}"
