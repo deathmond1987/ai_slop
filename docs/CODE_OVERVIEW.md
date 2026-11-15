@@ -140,19 +140,21 @@ Diagnostic/verification script для проверки upcoming/calendar candida
 
 ## GitHub Actions
 
-### `.github/workflows/docker.yml`
-Workflow "Publish release by button":
-- triggers: только `workflow_dispatch`;
-- автоматические push/tag/PR сборки отключены;
-- `preflight` job разрешает `version` и `tag` через `scripts/version.mjs`, а затем считает `major`, `minor`, `major_minor` и `prerelease` из разрешенной версии и input `prerelease`;
+### `.github/workflows/release.yml`
+Workflow "Release desktop packages and container image from main tag":
+- triggers: push tag `v*`;
+- `preflight` job проверяет семантику тега `v...` и что коммит тега достижим из ветки `main`;
+- `preflight` uses tag name as release version, marks pre-release when version contains `-`, и вычисляет `image_path` вида `<repository-owner>/steam-calendar`;
 - `checks` job выполняет `npm ci` и `npm run check`;
-- `docker` job по input `publish_docker` собирает и публикует image `ghcr.io/<owner>/steam-calendar`;
-- Docker tags для ручной публикации: exact version, `major.minor`, `major`, `sha-<short-sha>`, и `latest` только если `publish_latest=true` и `prerelease=false`;
-- `desktop` job по input `publish_release` использует matrix `linux`/`windows`; desktop builder images собираются локально внутри этих задач и не публикуются в GHCR;
+- `docker` job собирает production container image и публикует его в GHCR через `GHCR_TOKEN` (classic personal access token с `write:packages`), чтобы пакет не связывался автоматически с репозиторием;
+- GHCR package может существовать в personal/org account, но не должен появляться в Packages главной страницы репозитория, если не имеет repository source; уже существующий связанный пакет нужно один раз unlink в Package settings;
+- `docker` job использует `linux/amd64`, `linux/arm64`, GHA cache и добавляет `latest` только для non-pre-release версий;
+- `desktop` job использует matrix `linux`/`windows`; desktop builder images собираются локально внутри этих задач и не публикуются в registry;
 - Linux desktop task собирает все Linux-пакеты одной задачей в `desktop-linux-packages`: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и Arch Linux `.pkg.tar.zst` из `out/linux`;
 - Windows desktop task собирает `desktop-windows-packages` для Windows NSIS setup `.exe` из `out/windows`;
-- `release` job по input `publish_release` скачивает desktop artifacts, создает или обновляет GitHub release и загружает desktop-пакеты как release assets;
-- summary job пишет release URL.
+- `release` job скачивает desktop artifacts, создает или обновляет GitHub release, загружает desktop-пакеты как release assets и пишет GHCR image tags в release notes;
+- workflow permissions содержит только `contents: write`; GitHub Packages publishing через `GITHUB_TOKEN` отсутствует;
+- summary job пишет release URL и image path.
 
 ## Docs
 
@@ -229,7 +231,7 @@ Private ICS calendar export:
 - валидирует feed token через `getSteamIdFromCalendarFeedToken` и восстанавливает `IdentifiedSession` из stored user data;
 - без token и без session редиректит в `/auth/login`;
 - собирает `collectUpcoming(...)` и строит ICS через `buildIcsCalendar(...)`;
-- отдаёт `text/calendar` с `no-store` и filename `steam-calendar.ics`.
+- отдаёт `text/calendar` с `no-store` и `Content-Disposition: attachment; filename=steam-calendar.ics`.
 
 ## Server actions
 
@@ -294,7 +296,7 @@ Main calendar page `/calendar`, `dynamic = "force-dynamic"`.
 - Если feed token нет, показывает form, вызывающий `createCalendarFeedLink`, чтобы создать token и вернуться на локальную calendar страницу с `openGoogle=1`.
 - Показывает локальную Google-open панель при `openGoogle=1` и известном feed URL: кнопка возврата на `calendarBackPath` и явная external link `data-external="true"`.
 - Показывает flash сообщения `?feed=created` и `?feed=revoked`.
-- Всегда показывает download link `/calendar/ics` и `CalendarViewToggle`.
+- Всегда показывает `CalendarExportButton` для `/calendar/ics` и `CalendarViewToggle`.
 - Оборачивает `CalendarFeed` в `<Suspense fallback={<CalendarFeedSkeleton view={view} />}>`, чтобы тяжелая сборка upcoming games не блокировала rendering shell-страницы.
 
 ### `app/calendar/loading.tsx`
@@ -342,6 +344,11 @@ Client component with no rendered output, mounted in `app/layout.tsx`.
 - Active only inside Tauri when `window.__TAURI__?.shell?.open` exists.
 - Intercepts clicks on anchors marked `data-external="true"` and opens those `http(s)` URLs through `window.__TAURI__.shell.open`.
 - Does not intercept local sidecar links or ordinary browser behavior outside Tauri.
+
+### `components/CalendarExportButton.tsx`
+Client export link used for `/calendar/ics`.
+- Outside Tauri it behaves as a normal `<a download>` link.
+- Inside Tauri it fetches the local `/calendar/ics` response, checks `text/calendar`/`BEGIN:VCALENDAR`, then invokes `save_calendar_export` so WebView download behavior does not depend on HTML `download` support.
 
 ### `components/WishlistPriceCounter.tsx`
 Client component header wishlist total counter.

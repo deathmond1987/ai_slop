@@ -147,15 +147,17 @@ test("calendar week-row tracks keep card rows fixed and empty rows fill leftover
   assert.doesNotMatch(globalsSource, /--calendar-row-empty-max:/);
 });
 
-// Проверка фиксированной высоты карточек: ширина делится на 1.2.
-test("calendar game cards use a fixed height 1.2 times shorter than width", () => {
+// Проверка персистентной высоты карточки: высота зафиксирована и не зависит от фактической ширины колонки.
+test("calendar game cards use a persistent fixed vertical height", () => {
   const globalsSource = readFileSync("app/globals.css", "utf8");
+  const cardRule = globalsSource.match(/\.calendar-game-card\s*{[^}]*}/)?.[0] ?? "";
+  const dayCellRule = globalsSource.match(/\n\.calendar-day-cell\s*{[^}]*}/)?.[0] ?? "";
 
-  assert.match(globalsSource, /--calendar-game-card-ratio: 1\.2;/);
-  assert.match(
-    globalsSource,
-    /\.calendar-game-card\s*{[\s\S]*aspect-ratio: var\(--calendar-game-card-ratio\) \/ 1;[\s\S]*height: auto;/
-  );
+  assert.match(globalsSource, /--calendar-game-card-height: var\(--calendar-row-card-min\);/);
+  assert.match(cardRule, /height: var\(--calendar-game-card-height\);/);
+  assert.match(cardRule, /min-height: var\(--calendar-game-card-height\);/);
+  assert.doesNotMatch(cardRule, /height: auto;|min-height: 0;|aspect-ratio:/);
+  assert.match(dayCellRule, /overflow: visible;/);
 });
 
 test("calendar week rows and weekday headers are real CSS grids", () => {

@@ -1,0 +1,357 @@
+name: Release desktop packages and container image from main tag
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate tag and prepare release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      image_path: ${{ steps.meta.outputs.image_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve tag metadata
+        id: meta
+        shell: bash
+        env:
+          TAG_REF: ${{ github.ref_name }}
+          TAG_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "${TAG_REF}" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?)$ ]]; then
+            echo "Invalid release tag: ${TAG_REF}" >&2
+            echo "Use a tag such as v1.2.3 or v1.2.3-beta.1." >&2
+            exit 1
+          fi
+
+          version="${BASH_REMATCH[1]}"
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${TAG_SHA}" refs/remotes/origin/main; then
+            echo "Tag ${TAG_REF} is not reachable from branch main." >&2
+            exit 1
+          fi
+
+          if [[ "${version}" == *-* ]]; then
+            prerelease="true"
+          else
+            prerelease="false"
+          fi
+
+          repository_owner="${GITHUB_REPOSITORY_OWNER:-${GITHUB_REPOSITORY%%/*}}"
+          image_path="${repository_owner,,}/steam-calendar"
+
+          {
+            echo "version=${version}"
+            echo "tag=${TAG_REF}"
+            echo "prerelease=${prerelease}"
+            echo "image_path=${image_path}"
+          } >> "${GITHUB_OUTPUT}"
+
+  checks:
+    name: Run checks
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: npm run check
+
+  docker:
+    name: Build and publish container image
+    needs: [preflight, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      image_path: ${{ needs.preflight.outputs.image_path }}
+      image_tags: ${{ steps.meta.outputs.tags }}
+      image_digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check GHCR personal token secret
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GHCR_TOKEN}" ]; then
+            echo "Required secret GHCR_TOKEN is not configured." >&2
+            echo "Use a classic personal access token with write:packages scope." >&2
+            echo "Publishing with GHCR_TOKEN avoids automatic GitHub Packages linking to this repository." >&2
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Extract container metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ needs.preflight.outputs.image_path }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}},enable=${{ needs.preflight.outputs.prerelease == 'false' && !startsWith(needs.preflight.outputs.version, '0.') }}
+            type=raw,value=latest,enable=${{ needs.preflight.outputs.prerelease == 'false' }}
+            type=sha
+          labels: |
+            org.opencontainers.image.source=
+            org.opencontainers.image.title=Steam Calendar
+            org.opencontainers.image.description=Steam Calendar container image
+            org.opencontainers.image.revision={{sha}}
+
+      - name: Build and push container image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64, linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  desktop:
+    name: Build ${{ matrix.platform }} desktop packages
+    needs: [preflight, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux
+          - windows
+        include:
+          - platform: linux
+            build_script: scripts/desktop/build-linux-docker.sh
+            export_script: scripts/desktop/export-linux-packages.sh
+            export_kind: all
+            image: steam-calendar-linux-build:latest
+            out_dir: out/linux
+          - platform: windows
+            build_script: scripts/desktop/build-windows-docker.sh
+            export_script: scripts/desktop/export-windows-packages.sh
+            export_kind: all
+            image: steam-calendar-windows-build:latest
+            out_dir: out/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build builder image
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash "${{ matrix.build_script }}"
+
+      - name: Export desktop packages
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          EXPORT_KIND: ${{ matrix.export_kind }}
+          OUT_DIR: ${{ matrix.out_dir }}
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash "${{ matrix.export_script }}"
+
+      - name: Upload desktop packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-packages
+          path: ${{ matrix.out_dir }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: [preflight, checks, docker, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*-packages
+          merge-multiple: true
+          path: release-assets
+
+      - name: Prepare release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_PATH: ${{ needs.docker.outputs.image_path }}
+          IMAGE_TAGS: ${{ needs.docker.outputs.image_tags }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for asset_path in release-assets/*; do
+            if [ -f "${asset_path}" ]; then
+              assets+=("${asset_path}")
+            fi
+          done
+
+          {
+            printf '# Steam Calendar %s\n\n' "${VERSION}"
+            printf 'Commit: `%s`\n\n' "${GITHUB_SHA}"
+
+            if [ -n "${IMAGE_PATH}" ]; then
+              printf '## Container image\n\n'
+              printf 'GHCR image: `%s`\n\n' "${IMAGE_PATH}"
+              printf 'Tags:\n\n'
+              while IFS= read -r image_tag; do
+                if [ -n "${image_tag}" ]; then
+                  printf -- '- `%s`\n' "${image_tag}"
+                fi
+              done <<< "${IMAGE_TAGS}"
+              printf '\n'
+            fi
+
+            if [ "${#assets[@]}" -gt 0 ]; then
+              printf '## Desktop packages\n\n'
+              for asset_path in "${assets[@]}"; do
+                asset="$(basename "${asset_path}")"
+                case "${asset}" in
+                  *.deb)
+                    target='Debian/Ubuntu `.deb`'
+                    ;;
+                  *.rpm)
+                    target='RHEL/Fedora `.rpm`'
+                    ;;
+                  *.AppImage)
+                    target='Universal AppImage'
+                    ;;
+                  *.pkg.tar.zst)
+                    target='Arch Linux `.pkg.tar.zst`'
+                    ;;
+                  *.exe)
+                    target='Windows NSIS setup `.exe`'
+                    ;;
+                  *)
+                    target='Desktop package'
+                    ;;
+                esac
+                printf -- '- `%s` — %s\n' "${asset}" "${target}"
+              done
+            fi
+          } > release-notes.md
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for asset_path in release-assets/*; do
+            if [ -f "${asset_path}" ]; then
+              assets+=("${asset_path}")
+            fi
+          done
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            if [ "${#assets[@]}" -gt 0 ]; then
+              gh release upload "${TAG}" "${assets[@]}" --clobber
+            fi
+
+            gh release edit "${TAG}" \
+              --draft=false \
+              --prerelease="${PRERELEASE}" \
+              --title "Steam Calendar ${VERSION}" \
+              --notes-file release-notes.md
+
+            if [ "${PRERELEASE}" = "false" ]; then
+              gh release edit "${TAG}" --latest
+            fi
+          else
+            create_args=(release create "${TAG}")
+            if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+              create_args+=(--target "${GITHUB_SHA}")
+            fi
+
+            create_args+=(
+              --title "Steam Calendar ${VERSION}"
+              --notes-file release-notes.md
+            )
+
+            if [ "${PRERELEASE}" = "true" ]; then
+              create_args+=(--prerelease)
+            fi
+
+            gh "${create_args[@]}"
+
+            if [ "${#assets[@]}" -gt 0 ]; then
+              gh release upload "${TAG}" "${assets[@]}"
+            fi
+          fi
+
+      - name: Write release summary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_PATH: ${{ needs.docker.outputs.image_path }}
+        run: |
+          set -euo pipefail
+          release_url="$(gh release view "${TAG}" --json url --jq .url)"
+          {
+            printf '## Release\n\n'
+            printf '[Steam Calendar %s](%s)\n\n' "${VERSION}" "${release_url}"
+            if [ -n "${IMAGE_PATH}" ]; then
+              printf '## Container image\n\n'
+              printf 'GHCR image: `%s`\n\n' "${IMAGE_PATH}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -342,75 +342,26 @@ docker run --rm \
   steam-calendar:latest
 ```
 
-### Вариант 3: GitHub Actions и GitHub Container Registry
+### Вариант 3: GitHub Actions релиз desktop-пакетов и container image по тегу на main
 
-Workflow `.github/workflows/docker.yml` называется `Publish release by button` и запускается только вручную через `workflow_dispatch` (кнопка `Run workflow`). Автоматическая сборка на push, на тег `v*` и на pull request отключена.
+Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag` и запускается автоматически при создании тега `v*`. Workflow проверяет, что коммит тега достижим из ветки `main`; тег вне `main` завершает сборку ошибкой.
 
-Workflow делает проверки `npm ci && npm run check`, разрешает версию релиза через `scripts/version.mjs`, затем по выбранным кнопкой input-параметрам может собрать production Docker image в job `docker` и desktop-пакеты в job `desktop`.
+Workflow делает проверки `npm ci && npm run check`, затем собирает production container image, публикует его в GHCR, собирает desktop-артефакты через matrix `linux` и `windows`, скачивает desktop artifacts из Actions artifacts и создает или обновляет GitHub release с тем же тегом. `permissions` содержит только `contents: write`.
 
-Приоритет разрешения версии: переданный `version`/env-переменные, exact git tag на текущем commit, затем `package.json`. Для git tag workflow использует checkout с полной историей тегов.
+Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` и запушить его. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts и container metadata.
 
-При включенном `publish_docker` workflow логинится в GitHub Container Registry через встроенный `GITHUB_TOKEN` и публикует image:
+Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует `GHCR_TOKEN` — personal access token (classic) со scope `write:packages` — а не `GITHUB_TOKEN`, чтобы GHCR-пакет не связывался автоматически с репозиторием и не появлялся в разделе Packages главной страницы репозитория. Можно задать `GHCR_USERNAME`, если login-username отличается от `github.actor`.
 
-```bash
-ghcr.io/<lowercase-owner>/steam-calendar
-```
+Если GHCR-пакет уже был создан ранее через `GITHUB_TOKEN`, его нужно один раз unlink от репозитория в настройках пакета GitHub: Package settings -> `Repository source` -> удалить связь.
 
-Для ручной публикации Docker image workflow использует версию, разрешенную через `scripts/version.mjs`. Публикуются tags:
-- точная версия, например `1.2.3`;
-- `1.2`;
-- `1`;
-- `latest`, если `prerelease=false` и `publish_latest=true`;
-- `sha-<short-sha>` для конкретного commit.
-
-Pull request image больше не собирается автоматически.
-
-Забрать опубликованный image и запустить его можно так:
-
-```bash
-docker pull ghcr.io/your-owner/steam-calendar:latest
-
-docker run --rm \
-  --publish 5000:3000 \
-  --env AUTH_BASE_URL="http://localhost:5000" \
-  --env DB_SQLITE_PATH=/app/data/steam-calendar.sqlite \
-  --volume steam-calendar-data:/app/data \
-  ghcr.io/your-owner/steam-calendar:latest
-```
-
-Для приватного GitHub-репозитория или приватного пакета в `ghcr.io` перед `docker pull` нужен логин в registry. В GitHub Actions достаточно встроенного `GITHUB_TOKEN` с permission `packages: write`. Для ручного pull на своей машине используйте personal access token с правами `read:packages`:
-
-```bash
-echo "$GITHUB_PERSONAL_ACCESS_TOKEN" | docker login ghcr.io -U your-github-username --password-stdin
-docker pull ghcr.io/your-owner/steam-calendar:latest
-```
-
-Ссылка на страницу пакета после первой публикации обычно выглядит так:
-
-```bash
-https://github.com/<owner>/steam-calendar/pkgs/container/steam-calendar
-```
-
-Если репозиторий приватный, GitHub по умолчанию создаёт приватный пакет в `ghcr.io`. Ссылка на image не будет общедоступной, пока visibility пакета не будет изменена вручную в настройках пакета или пока pull не выполняется авторизованным пользователем с доступом к пакету.
-
-### Публикация desktop-релизов по кнопке
-
-Если включен input `publish_release`, workflow собирает desktop-артефакты через две matrix-задачи на основе существующих Docker-скриптов:
+Desktop-артефакты собираются через существующие Docker-скрипты:
 
 - `linux`: одна задача собирает все Linux-пакеты в `out/linux` — `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux;
 - `windows`: отдельная задача собирает NSIS setup `.exe` в `out/windows`.
 
-Отдельные builder/export jobs и публикация builder-образов в GHCR для desktop-пакетов не используются. Desktop builder images собираются локально внутри нужной matrix-задачи.
+Desktop builder images собираются локально внутри matrix-задачи и не публикуются в registry.
 
-После сборки workflow создает GitHub release с тегом `v<version>` и загружает эти файлы как release assets. Если релиз с таким тегом уже существует, assets обновляются с `--clobber`, а title и notes перезаписываются.
-
-Input-параметры кнопки `Run workflow`:
-
-- `version`: необязательная версия релиза, например `1.2.3`, `1.2.3-beta.1` или `v1.2.3`; если пусто, workflow использует `scripts/version.mjs`, который сначала проверяет git tag на текущем commit, затем `package.json`;
-- `prerelease`: пометить GitHub release как pre-release и не публиковать Docker tag `latest`; версия с пре-релизной частью вида `1.2.3-beta.1` также автоматически помечает релиз как pre-release;
-- `publish_docker`: включить сборку и публикацию Docker image в GitHub Container Registry;
-- `publish_latest`: дополнительно опубликовать Docker tag `latest`;
-- `publish_release`: включить сборку desktop-пакетов и публикацию GitHub release.
+GitHub release содержит desktop packages как release assets и текстовую секцию с GHCR image tags. Если релиз с таким тегом уже существует, assets обновляются с `--clobber`, а title и notes перезаписываются. Если версия содержит `-`, GitHub release автоматически помечается как pre-release.
 
 ## Логи
 
@@ -511,7 +462,7 @@ docker run --rm \
 
 Переменная для `scripts/docker-build.sh` и `scripts/docker-run.sh`. Имя и тег image.
 
-Workflow `.github/workflows/docker.yml` публикует image в GitHub Container Registry как `ghcr.io/<lowercase-owner>/steam-calendar`; локальные скрипты по умолчанию используют `steam-calendar:latest`.
+GitHub Actions release workflow публикует production image в `ghcr.io/<repository-owner>/steam-calendar` через `GHCR_TOKEN`, чтобы пакет не был автоматически связан с репозиторием; локальные скрипты по умолчанию используют `steam-calendar:latest`.
 
 ```bash
 IMAGE=steam-calendar:latest

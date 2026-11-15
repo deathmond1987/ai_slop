@@ -100,21 +100,24 @@
   - вместо прямого `redirect(googleCalendarImportUrl(feedUrl))` в server action показывать локальную страницу с кнопкой "Назад в приложение" и явной кнопкой "Открыть Google Calendar в браузере";
   - добавить в desktop-обёртку минимальную панель навигации/кнопку возврата на локальный sidecar URL.
 
-## 11. Публикация desktop-пакетов и Docker-образа по кнопке, без автоматической сборки
+## 11. Публикация desktop-пакетов и container image по тегу на main без linked packages в репозитории
 
-**Статус:** реализовано на уровне workflow и документации; GitHub Actions можно проверить только ручным запуском `Run workflow`.
+**Статус:** реализовано на уровне workflow и документации; фактический GitHub Actions run нужно проверить после коммита и создания тега на `main`.
 
-- Workflow `.github/workflows/docker.yml` переименован в `Publish release by button`.
-- Убраны автоматические триггеры `push`, `push tags v*` и `pull_request`.
-- Запуск разрешен только через `workflow_dispatch`, то есть через кнопку `Run workflow` в GitHub Actions.
+- Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag`.
+- Триггер сборки: push tag `v*`.
+- `preflight` job проверяет, что коммит тега достижим из ветки `main`; тег вне `main` делает workflow failed.
+- Версия релиза берется из имени тега: `v1.2.3` дает `1.2.3`, `v1.2.3-beta.1` дает pre-release `1.2.3-beta.1`.
 - Workflow сначала выполняет `preflight` и `checks` (`npm ci`, `npm run check`).
-- Docker image собирается и публикуется в GitHub Container Registry только при input `publish_docker`.
-- Docker image публикуется как `ghcr.io/<owner>/steam-calendar` с тегами version, major.minor, major, SHA и опциональным `latest`.
-- При `prerelease=true` или при версии вида `1.2.3-beta.1` GitHub release помечается pre-release и Docker tag `latest` не публикуется.
+- Production container image собирается и публикуется в GHCR `ghcr.io/<repository-owner>/steam-calendar` через `docker` job после `checks`.
+- GHCR login использует secret `GHCR_TOKEN` (classic personal access token с `write:packages`) и optional `GHCR_USERNAME`; `GITHUB_TOKEN` для публикации контейнера не используется.
+- `permissions` содержит только `contents: write`; workflow не получает `packages: write`, поэтому GHCR-пакет не связывается автоматически с репозиторием и не появляется в разделе Packages главной страницы репозитория.
+- В Docker labels `org.opencontainers.image.source` оставлен пустым, чтобы не подключать GHCR-пакет к репозиторию.
+- Если пакет уже был создан ранее через `GITHUB_TOKEN` и связан с репозиторием, его нужно один раз unlink в Package settings; workflow это не делает автоматически.
 - Desktop-пакеты собираются через существующие Docker-скрипты:
   - Linux `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst` в одной Linux task;
   - Windows NSIS setup `.exe`.
-- При `publish_release=true` workflow собирает desktop-пакеты и публикует их как GitHub release assets с тегом `v<version>`.
+- Workflow загружает desktop-пакеты как GitHub release assets на страницу releases.
 
 ## Новая фаза: 11 изменений
 
@@ -202,10 +205,11 @@
 
 ### 11. Оптимизировать пайплайн сборки
 
-**Статус:** пайплайн упрощен: `.github/workflows/docker.yml` выполняет `preflight`, `checks`, отдельную job `docker` для production Docker-контейнера, desktop matrix с задачами `linux` и `windows`, затем `release`. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Отдельные builder/export jobs и публикация desktop builder-образов в GHCR убраны; проверка реального GitHub Actions runs продолжается после повторного запуска.
+**Статус:** пайплайн изменен на триггер по тегу на `main`: `.github/workflows/release.yml` выполняет `preflight`, `checks`, `docker`, desktop matrix с задачами `linux` и `windows`, затем `release`. `docker` job публикует production container image в GHCR через `GHCR_TOKEN` без automatic repository package linking. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Проверка реального GitHub Actions runs продолжается после создания тега на `main`.
 
-- Production Docker-контейнер собирается в отдельной job `docker` при `publish_docker=true`.
+- Release workflow запускается push tag `v*` и проверяет, что тег достижим из ветки `main`.
 - Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`.
 - Linux task в одном job собирает `desktop-linux-packages`: `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst`.
 - Windows task в одном job собирает `desktop-windows-packages`.
 - Не запускать лишние отдельные builder/export jobs и не публиковать desktop builder images в GHCR.
+- GHCR production image публикуется как personal/org package и не должен быть linked to repository; GitHub release содержит desktop assets и GHCR image tags.

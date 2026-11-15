@@ -1,4 +1,5 @@
 import { createCalendarFeedLink, revokeCalendarFeedLink } from "@/app/actions/calendar-feed";
+import { CalendarExportButton } from "@/components/CalendarExportButton";
 import { getT } from "@/lib/i18n";
 
 export async function CalendarSubscriptionMenu({
@@ -58,9 +59,10 @@ export async function CalendarSubscriptionMenu({
               >
                 {t("calendar.subscribe.ics")}
               </a>
-              <a href="/calendar/ics" download className={borderedLink}>
-                {t("calendar.export.ics")}
-              </a>
+              <CalendarExportButton
+                label={t("calendar.export.ics")}
+                className={borderedLink}
+              />
               <form action={revokeCalendarFeedLink}>
                 <input type="hidden" name="month" value={monthValue} />
                 <input type="hidden" name="view" value={view} />
@@ -81,9 +83,10 @@ export async function CalendarSubscriptionMenu({
                   {t("calendar.subscribe.create")}
                 </button>
               </form>
-              <a href="/calendar/ics" download className={borderedLink}>
-                {t("calendar.export.ics")}
-              </a>
+              <CalendarExportButton
+                label={t("calendar.export.ics")}
+                className={borderedLink}
+              />
             </div>
           </>
         )}
