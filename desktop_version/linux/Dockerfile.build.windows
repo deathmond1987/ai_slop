@@ -1,0 +1,54 @@
+FROM node:24-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+ENV STEAM_CALENDAR_TARGET_TRIPLE=x86_64-pc-windows-msvc
+ENV STEAM_CALENDAR_NODE_BINARY=/workspace/desktop_version/linux/.build/node-windows/node.exe
+ENV XWIN_CACHE_DIR=/usr/local/share/xwin
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  build-essential \
+  ca-certificates \
+  clang \
+  curl \
+  file \
+  lld \
+  llvm \
+  nsis \
+  nsis-common \
+  pkg-config \
+  unzip \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p "$XWIN_CACHE_DIR"
+
+RUN curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+RUN rustup target add x86_64-pc-windows-msvc
+RUN cargo install --locked cargo-xwin
+RUN cargo-xwin --version
+
+WORKDIR /workspace
+COPY . .
+
+RUN mkdir -p /usr/share/nsis/Include/Win && \
+  cp /workspace/desktop_version/linux/nsis/Win/RestartManager.nsh /usr/share/nsis/Include/Win/RestartManager.nsh
+
+RUN npm ci
+RUN npm run build
+RUN node desktop_version/linux/scripts/gen-icons.mjs
+RUN node desktop_version/linux/scripts/fetch-windows-node.mjs
+RUN node desktop_version/linux/scripts/build-sidecar.mjs
+
+RUN cd desktop_version/linux/.build/app && \
+  (HOSTNAME=127.0.0.1 PORT=3721 NODE_ENV=production DB_SQLITE_PATH=/tmp/steam-calendar.sqlite AUTH_BASE_URL=http://127.0.0.1:3721 COOKIE_SECURE=false node server.js &) && \
+  sleep 2 && \
+  curl -fsS http://127.0.0.1:3721/api/health && \
+  curl -fsS http://127.0.0.1:3721/ >/dev/null
+
+WORKDIR /workspace/desktop_version/linux/src-tauri
+RUN cargo-xwin build --target x86_64-pc-windows-msvc
+
+WORKDIR /workspace
+RUN npm run desktop:tauri:build:windows:nsis

@@ -61,7 +61,10 @@ export default async function CalendarPage({
   const feedUrl = feedToken && origin ? calendarFeedUrl(origin, feedToken) : undefined;
   const googleUrl = feedUrl ? googleCalendarImportUrl(feedUrl) : undefined;
   const feedStatus = Array.isArray(sp.feed) ? sp.feed[0] : sp.feed;
+  const openGoogleParam = Array.isArray(sp.openGoogle) ? sp.openGoogle[0] : sp.openGoogle;
+  const openGoogle = openGoogleParam === "1";
   const monthValue = `${year}-${String(month1).padStart(2, "0")}`;
+  const calendarBackPath = `/calendar?month=${encodeURIComponent(monthValue)}&view=${encodeURIComponent(view)}`;
   logDebug("calendar.page.render", {
     view,
     year,
@@ -81,6 +84,7 @@ export default async function CalendarPage({
                 href={googleUrl ?? feedPath}
                 target="_blank"
                 rel="noreferrer"
+                data-external={googleUrl ? "true" : undefined}
                 className="rounded bg-[#1b2838] px-3 py-1 text-white hover:bg-[#2a475e]"
               >
                 {googleUrl ? t("calendar.subscribe.google") : t("calendar.subscribe.ics")}
@@ -140,6 +144,29 @@ export default async function CalendarPage({
           <CalendarViewToggle lang={lang} view={view} year={year} month1={month1} />
         </div>
       </div>
+
+      {openGoogle && feedUrl && googleUrl ? (
+        <div className="text-xs rounded border border-sky-300 dark:border-sky-700 bg-sky-100 dark:bg-sky-900/30 px-3 py-2">
+          <p className="mb-2">{t("calendar.google.help")}</p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <a
+              href={calendarBackPath}
+              className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              {t("calendar.google.back")}
+            </a>
+            <a
+              href={googleUrl}
+              target="_blank"
+              rel="noreferrer"
+              data-external="true"
+              className="rounded bg-[#1b2838] px-3 py-1 text-white hover:bg-[#2a475e]"
+            >
+              {t("calendar.google.open")}
+            </a>
+          </div>
+        </div>
+      ) : null}
 
       {feedStatus === "created" && (
         <div className="text-xs rounded border border-green-300 dark:border-green-700 bg-green-100 dark:bg-green-900/30 px-3 py-2">

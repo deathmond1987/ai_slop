@@ -339,7 +339,7 @@ test("logout and login reuse aggregate cache only by steamId and current setting
   });
 
   const otherUser = await loadUpcomingWithCache<Fixture>({
-    context: contextFor({ steamId: "10000000111111111" }),
+    context: contextFor({ steamId: "10000000000000006" }),
     cacheGet: cache.get,
     cacheSet: cache.set,
     pending,

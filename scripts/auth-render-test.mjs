@@ -13,7 +13,7 @@ const projectRoot = path.resolve(import.meta.dirname, "..");
 const resolverPath = path.join(projectRoot, "tests", "ts-extension-resolver.mjs");
 register(pathToFileURL(resolverPath).href, import.meta.url);
 
-const steamId = "10000000015461483";
+const steamId = "10000000000000001";
 const gameName = "Auth Test Game";
 const SESSION_COOKIE = "steam_calendar_session";
 const requireBrowser = process.env.AUTH_RENDER_REQUIRE_BROWSER === "1";

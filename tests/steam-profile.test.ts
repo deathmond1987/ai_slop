@@ -9,12 +9,12 @@ import {
 test("parses steam community open graph profile metadata", () => {
   const profile = parseSteamProfileHtml(`
     <html><head>
-      <meta property="og:title" content="Steam Community :: Deathmond &amp; Sons">
+      <meta property="og:title" content="Steam Community :: Test &amp; Sons">
       <meta property="og:image" content="https://avatars.fastly.steamstatic.com/abc_full.jpg">
     </head><body></body></html>
   `);
 
-  assert.equal(profile.displayName, "Deathmond & Sons");
+  assert.equal(profile.displayName, "Test & Sons");
   assert.equal(profile.avatar, "https://avatars.fastly.steamstatic.com/abc_full.jpg");
 });
 

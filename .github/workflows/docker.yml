@@ -1,31 +1,106 @@
-name: Build and publish container image
+name: Publish release by button
 
 on:
-  push:
-    branches:
-      - main
-      - master
-    tags:
-      - "v*"
-  pull_request:
-    branches:
-      - main
-      - master
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version. Accepts 1.2.3 or v1.2.3. Empty value uses package.json version."
+        required: false
+      prerelease:
+        description: "Mark GitHub release and container latest policy as pre-release."
+        type: boolean
+        default: false
+      publish_docker:
+        description: "Build and publish container image to GitHub Container Registry."
+        type: boolean
+        default: true
+      publish_latest:
+        description: "Also push latest tag when prerelease is false."
+        type: boolean
+        default: true
+      publish_release:
+        description: "Build desktop packages and publish them as GitHub release assets."
+        type: boolean
+        default: true
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
-  group: docker-image-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: publish-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  docker:
-    name: Build and publish
+  preflight:
+    name: Prepare release metadata
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      major: ${{ steps.meta.outputs.major }}
+      minor: ${{ steps.meta.outputs.minor }}
+      major_minor: ${{ steps.meta.outputs.major_minor }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Resolve version
+        id: meta
+        shell: bash
+        env:
+          VERSION_INPUT: ${{ inputs.version }}
+          PRERELEASE_INPUT: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ -n "$VERSION_INPUT" ]; then
+            export STEAM_CALENDAR_VERSION="$VERSION_INPUT"
+          fi
+
+          version="$(node scripts/version.mjs get)"
+          prerelease_input="${PRERELEASE_INPUT:-false}"
+
+          if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version: $version" >&2
+            echo "Use a semver-like value such as 1.2.3, 1.2.3-beta.1, or v1.2.3." >&2
+            exit 1
+          fi
+
+          if [[ "$version" == *-* || "$prerelease_input" == "true" ]]; then
+            prerelease="true"
+          else
+            prerelease="false"
+          fi
+
+          tag="v${version}"
+          major="${BASH_REMATCH[1]}"
+          minor="${BASH_REMATCH[2]}"
+          major_minor="${major}.${minor}"
+
+          {
+            echo "version=${version}"
+            echo "tag=${tag}"
+            echo "major=${major}"
+            echo "minor=${minor}"
+            echo "major_minor=${major_minor}"
+            echo "prerelease=${prerelease}"
+          } >> "${GITHUB_OUTPUT}"
+
+  checks:
+    name: Run checks
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,10 +117,25 @@ jobs:
       - name: Run checks
         run: npm run check
 
+  docker:
+    name: Build and publish container image
+    needs: [preflight, checks]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      image_path: ${{ steps.image.outputs.IMAGE_PATH }}
+      image_tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout
+        if: inputs.publish_docker
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
+        if: inputs.publish_docker
         uses: docker/setup-buildx-action@v3
 
       - name: Set image name
+        if: inputs.publish_docker
         id: image
         shell: bash
         run: |
@@ -54,18 +144,17 @@ jobs:
           echo "IMAGE_PATH=${owner}/steam-calendar" >> "${GITHUB_OUTPUT}"
 
       - name: Docker metadata
+        if: inputs.publish_docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ steps.image.outputs.IMAGE_PATH }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
+            type=raw,value=${{ needs.preflight.outputs.version }}
+            type=raw,value=${{ needs.preflight.outputs.major_minor }}
+            type=raw,value=${{ needs.preflight.outputs.major }}
+            type=raw,value=latest,enable=${{ needs.preflight.outputs.prerelease != 'true' && inputs.publish_latest }}
             type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
           labels: |
             org.opencontainers.image.title=steam-calendar
             org.opencontainers.image.description=Steam Calendar production Docker image
@@ -73,25 +162,26 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
+        if: inputs.publish_docker
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build image
+      - name: Build and push image
+        if: inputs.publish_docker
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Write image summary
-        if: github.event_name != 'pull_request'
+        if: inputs.publish_docker
         shell: bash
         env:
           IMAGE_PATH: ${{ steps.image.outputs.IMAGE_PATH }}
@@ -104,4 +194,174 @@ jobs:
             printf 'Pushed tags:\n\n```text\n'
             printf '%s\n' "${IMAGE_TAGS}"
             printf '```\n'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  desktop:
+    name: Build ${{ matrix.platform }} desktop packages
+    needs: [preflight, checks]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - linux
+          - windows
+        include:
+          - platform: linux
+            build_script: scripts/desktop/build-linux-docker.sh
+            export_script: scripts/desktop/export-linux-packages.sh
+            image: steam-calendar-linux-build:latest
+            out_dir: out/linux
+          - platform: windows
+            build_script: scripts/desktop/build-windows-docker.sh
+            export_script: scripts/desktop/export-windows-packages.sh
+            image: steam-calendar-windows-build:latest
+            out_dir: out/windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build builder image
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash "${{ matrix.build_script }}"
+
+      - name: Export desktop packages
+        shell: bash
+        env:
+          IMAGE: ${{ matrix.image }}
+          OUT_DIR: ${{ matrix.out_dir }}
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash "${{ matrix.export_script }}"
+
+      - name: Upload desktop packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.platform }}-packages
+          path: ${{ matrix.out_dir }}
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: [preflight, checks, desktop, docker]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download desktop packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*-packages
+          merge-multiple: true
+          path: release-assets
+
+      - name: Prepare release notes
+        shell: bash
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          GITHUB_SHA: ${{ github.sha }}
+          IMAGE_PATH: ${{ needs.docker.outputs.image_path }}
+          IMAGE_TAGS: ${{ needs.docker.outputs.image_tags }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for asset_path in release-assets/*; do
+            if [ -f "${asset_path}" ]; then
+              assets+=("${asset_path}")
+            fi
+          done
+
+          {
+            printf '# Steam Calendar %s\n\n' "${VERSION}"
+            printf 'Commit: `%s`\n\n' "${GITHUB_SHA}"
+
+            if [ -n "${IMAGE_PATH}" ] && [ -n "${IMAGE_TAGS}" ]; then
+              printf 'Container image: `ghcr.io/%s`\n\n' "${IMAGE_PATH}"
+              printf '```text\n'
+              printf '%s\n' "${IMAGE_TAGS}"
+              printf '```\n\n'
+            fi
+
+            if [ "${#assets[@]}" -gt 0 ]; then
+              printf '## Desktop packages\n\n'
+              for asset_path in "${assets[@]}"; do
+                printf -- '- `%s`\n' "$(basename "${asset_path}")"
+              done
+            fi
+          } > release-notes.md
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          assets=()
+          for asset_path in release-assets/*; do
+            if [ -f "${asset_path}" ]; then
+              assets+=("${asset_path}")
+            fi
+          done
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            if [ "${#assets[@]}" -gt 0 ]; then
+              gh release upload "${TAG}" "${assets[@]}" --clobber
+            fi
+
+            gh release edit "${TAG}" \
+              --draft=false \
+              --prerelease="${PRERELEASE}" \
+              --title "Steam Calendar ${VERSION}" \
+              --notes-file release-notes.md
+
+            if [ "${PRERELEASE}" = "false" ]; then
+              gh release edit "${TAG}" --latest
+            fi
+          else
+            create_args=(release create "${TAG}")
+            if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+              create_args+=(--target "${GITHUB_SHA}")
+            fi
+
+            create_args+=(
+              --title "Steam Calendar ${VERSION}"
+              --notes-file release-notes.md
+            )
+
+            if [ "${PRERELEASE}" = "true" ]; then
+              create_args+=(--prerelease)
+            fi
+
+            gh "${create_args[@]}"
+
+            if [ "${#assets[@]}" -gt 0 ]; then
+              gh release upload "${TAG}" "${assets[@]}"
+            fi
+          fi
+
+      - name: Write release summary
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.preflight.outputs.tag }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          set -euo pipefail
+          release_url="$(gh release view "${TAG}" --json html_url --jq .html_url)"
+          {
+            printf '## Release\n\n'
+            printf '[Steam Calendar %s](%s)\n\n' "${VERSION}" "${release_url}"
           } >> "${GITHUB_STEP_SUMMARY}"

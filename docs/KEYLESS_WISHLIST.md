@@ -4,17 +4,17 @@
 
 Да. Полный публичный Steam wishlist можно получить без Steam Web API key, cookie и OpenID login.
 
-Проверенные public JSON endpoints для steamid `10000000015461483`:
+Проверенные public JSON endpoints используют SteamID64 вида `<steamid64>`:
 
 ```text
-https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1?steamid=10000000015461483
-https://api.steampowered.com/IWishlistService/GetWishlist/v1?steamid=10000000015461483
+https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1?steamid=<steamid64>
+https://api.steampowered.com/IWishlistService/GetWishlist/v1?steamid=<steamid64>
 ```
 
 Результат:
 
-- `GetWishlistItemCount`: `34`;
-- `GetWishlist`: `34` appid;
+- `GetWishlistItemCount`: количество wishlisted items;
+- `GetWishlist`: соответствующий appid-список;
 - обычный public SSR wishlist page отдаёт только первые `30` elements.
 
 ## Про `wishlistdata/?p=0`
@@ -38,7 +38,7 @@ GET https://api.steampowered.com/IWishlistService/GetWishlistItemCount/v1?steami
 Example:
 
 ```json
-{"response":{"count":34}}
+{"response":{"count":7}}
 ```
 
 Wishlist:
@@ -53,7 +53,7 @@ Example:
 {
   "response": {
     "items": [
-      {"appid":388860,"priority":30,"date_added":1765441236}
+      {"appid":42,"priority":30,"date_added":1700000000}
     ]
   }
 }
@@ -195,13 +195,13 @@ if __name__ == '__main__':
 Appid-only:
 
 ```bash
-python3 scripts/public_wishlist_api.py 10000000015461483
+python3 scripts/public_wishlist_api.py <steamid64>
 ```
 
 С metadata enrichment:
 
 ```bash
-python3 scripts/public_wishlist_api.py 10000000015461483 --details
+python3 scripts/public_wishlist_api.py <steamid64> --details
 ```
 
 ## Protobuf fallback

@@ -24,7 +24,7 @@ coverage
 out
 build
 tests
-scripts
+/scripts
 docs
 PLAN.md
 AGENTS.md
@@ -33,3 +33,7 @@ next-env.d.ts
 *.sqlite-wal
 *.sqlite-shm
 *.tsbuildinfo
+desktop_version/linux/.build
+desktop_version/linux/dist
+desktop_version/linux/src-tauri/target
+desktop_version/linux/src-tauri/binaries

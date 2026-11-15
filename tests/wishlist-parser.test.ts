@@ -10,7 +10,7 @@ import {
   parseWishlistPageResult,
 } from "../lib/wishlist-core.ts";
 
-const steamId = "10000000015461483";
+const steamId = "10000000000000001";
 
 test("wishlist page parser extracts items, total count, titles, covers and release text", () => {
   const ssrData = {

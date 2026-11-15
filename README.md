@@ -246,6 +246,49 @@ chown 1000:1000 data
 chmod 0755 data
 ```
 
+## Desktop-сборки
+
+Собрать все уже поддерживаемые desktop-платформы одной командой:
+
+```bash
+bash build/all.sh
+# или
+npm run build:all
+```
+
+Собрать только Linux-артефакты в `./out/linux`:
+
+```bash
+bash build/linux.sh
+# или
+npm run build:linux
+```
+
+Ожидаемые файлы:
+
+```text
+out/linux/steam-calendar_<version>_amd64.deb
+out/linux/steam-calendar-<version>-1.x86_64.rpm
+out/linux/steam-calendar_<version>_amd64.AppImage
+out/linux/steam-calendar-<version>-1-x86_64.pkg.tar.zst
+```
+
+Собрать только Windows installer в `./out/windows`:
+
+```bash
+bash build/windows.sh
+# или
+npm run build:windows
+```
+
+Ожидаемый файл:
+
+```text
+out/windows/steam-calendar_<version>_x64-setup.exe
+```
+
+Windows installer получается как NSIS setup `.exe`; он не подписан и содержит `steam-calendar-desktop.exe`, `steam-calendar-node.exe` и uninstaller.
+
 ## Сборка релизного Docker-контейнера
 
 ### Вариант 1: через скрипт
@@ -301,29 +344,26 @@ docker run --rm \
 
 ### Вариант 3: GitHub Actions и GitHub Container Registry
 
-В репозитории есть workflow `.github/workflows/docker.yml`. Он запускается на push в `main`/`master`, на push тега `v*`, на `workflow_dispatch` и на pull request в `main`/`master`.
+Workflow `.github/workflows/docker.yml` называется `Publish release by button` и запускается только вручную через `workflow_dispatch` (кнопка `Run workflow`). Автоматическая сборка на push, на тег `v*` и на pull request отключена.
 
-Workflow:
+Workflow делает проверки `npm ci && npm run check`, разрешает версию релиза через `scripts/version.mjs`, затем по выбранным кнопкой input-параметрам может собрать Docker image и desktop-пакеты.
 
-```bash
-npm ci
-npm run check
-docker build
-```
+Приоритет разрешения версии: переданный `version`/env-переменные, exact git tag на текущем commit, затем `package.json`. Для git tag workflow использует checkout с полной историей тегов.
 
-Для push-событий workflow логинится в GitHub Container Registry через встроенный `GITHUB_TOKEN` и публикует image:
+При включенном `publish_docker` workflow логинится в GitHub Container Registry через встроенный `GITHUB_TOKEN` и публикует image:
 
 ```bash
 ghcr.io/<lowercase-owner>/steam-calendar
 ```
 
-Публикуются tags:
-- `latest` только для default branch;
-- branch tags для `main`/`master`;
-- semver tags для релизных тегов вида `v1.2.3`, например `1.2.3`, `1.2`, `1`;
+Для ручной публикации Docker image workflow использует версию, разрешенную через `scripts/version.mjs`. Публикуются tags:
+- точная версия, например `1.2.3`;
+- `1.2`;
+- `1`;
+- `latest`, если `prerelease=false` и `publish_latest=true`;
 - `sha-<short-sha>` для конкретного commit.
 
-На pull request image собирается только для проверки Dockerfile и сборки, но никуда не публикуется.
+Pull request image больше не собирается автоматически.
 
 Забрать опубликованный image и запустить его можно так:
 
@@ -353,11 +393,32 @@ https://github.com/<owner>/steam-calendar/pkgs/container/steam-calendar
 
 Если репозиторий приватный, GitHub по умолчанию создаёт приватный пакет в `ghcr.io`. Ссылка на image не будет общедоступной, пока visibility пакета не будет изменена вручную в настройках пакета или пока pull не выполняется авторизованным пользователем с доступом к пакету.
 
+### Публикация desktop-релизов по кнопке
+
+Если включен input `publish_release`, workflow собирает desktop-артефакты через существующие Docker-скрипты:
+
+- Linux: `.deb`, `.rpm` и AppImage из `out/linux`;
+- Windows: NSIS setup `.exe` из `out/windows`.
+
+После сборки workflow создает GitHub release с тегом `v<version>` и загружает эти файлы как release assets. Если релиз с таким тегом уже существует, assets обновляются с `--clobber`, а title и notes перезаписываются.
+
+Input-параметры кнопки `Run workflow`:
+
+- `version`: необязательная версия релиза, например `1.2.3`, `1.2.3-beta.1` или `v1.2.3`; если пусто, workflow использует `scripts/version.mjs`, который сначала проверяет git tag на текущем commit, затем `package.json`;
+- `prerelease`: пометить GitHub release как pre-release и не публиковать Docker tag `latest`; версия с пре-релизной частью вида `1.2.3-beta.1` также автоматически помечает релиз как pre-release;
+- `publish_docker`: включить сборку и публикацию Docker image в GitHub Container Registry;
+- `publish_latest`: дополнительно опубликовать Docker tag `latest`;
+- `publish_release`: включить сборку desktop-пакетов и публикацию GitHub release.
+
 ## Логи
 
 Все debug-сообщения приложения пишутся в stdout контейнера. В Docker-образе и Compose по умолчанию включён `APP_DEBUG=1`, поэтому серверные route handlers, server actions, Next.js pages, Steam/RAWG/wishlist/upcoming helpers, SQLite и auth/session ошибки логируются в stdout контейнера через `lib/debug.ts`.
 
 Debug-логи автоматически скрывают типичные секреты и чувствительные параметры: Steam/RAWG API keys, `SESSION_PASSWORD`, `DB_ENCRYPTION_KEY`, cipher-значения, cookies, authorization headers и URL с query secrets. В production-проверках `NODE_ENV=test` debug по умолчанию выключен, если `APP_DEBUG` явно не задан.
+
+### Request ID
+
+JSON-ответы для Steam webhook ошибок содержат `requestId` и заголовок `x-request-id`. Клиент может передать `x-request-id` или alternate `request-id`; если он отсутствует или недопустим, приложение генерирует короткий идентификатор. Для `/api/steam/webhook` этот идентификатор попадает в response header, response JSON и debug-логи. Проверка есть в `tests/request-context.test.ts`.
 
 Для локального запуска debug можно выключить явно:
 

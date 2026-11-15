@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
+  --surface-border: #e4e4e7;
   --ui-scale: 1.25;
   --app-shell-width: calc(1440px * var(--ui-scale));
   --calendar-shell-width: calc(1080px * var(--ui-scale));
@@ -54,11 +59,45 @@ html {
   }
 }
 
+html {
+  color-scheme: light;
+}
+
+html.light {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #171717;
+  --surface: #ffffff;
+  --surface-muted: #f4f4f5;
+  --surface-border: #e4e4e7;
+}
+
+html.dark {
+  color-scheme: dark;
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --surface: #171717;
+  --surface-muted: #262626;
+  --surface-border: #3f3f46;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  html:not(.light) {
+    color-scheme: dark;
     --background: #0a0a0a;
     --foreground: #ededed;
+    --surface: #171717;
+    --surface-muted: #262626;
+    --surface-border: #3f3f46;
   }
+}
+
+html:not(.light) header.app-shell {
+  border-bottom-color: var(--surface-border);
+}
+
+html:not(.light) footer {
+  color: var(--foreground);
 }
 
 body {

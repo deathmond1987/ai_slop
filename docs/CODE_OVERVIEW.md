@@ -15,22 +15,21 @@
 - Задаёт runtime env: `NODE_ENV=production`, `HOSTNAME=0.0.0.0`, `PORT=3000`, `DB_SQLITE_PATH=/app/data/steam-calendar.sqlite`, `APP_DEBUG=1`.
 
 ### `README.md`
-Основная документация проекта: локальная установка, dev/start/check, Docker build/run/compose, GitHub Actions/GHCR, переменные окружения, описание debug-логов, SQLite volume, session secret, Steam OpenID, RAWG/Steam keys, UI scale и календарных секций.
+Основная документация проекта: локальная установка, dev/start/check, Docker build/run/compose, desktop-сборки Linux/Windows и пути артефактов в `./out`, GitHub Actions/GHCR, переменные окружения, описание debug-логов, SQLite volume, session secret, Steam OpenID, RAWG/Steam keys, UI scale и календарных секций.
 
 ### `PLAN.md`
-План/статус фичи "Сумма вишлиста": учёт итоговых цен, скидки, модалка скидок, скрытие цен купленных игр, переименование счётчика `header.wishlistTotal` в русскую формулировку "до полного счастья осталось:".
+План/статус текущих рабочих этапов проекта: dark theme, Docker-скрипты для desktop-сборок, Linux `.deb`/AppImage/`.rpm`/Arch packaging, готовые артефакты в `./out`, Windows NSIS installer, собираемый из Linux через Docker и cross-compilation.
 
 ### `package.json`
 Манифест npm-пакета:
-- Name: `steam-calendar`, version `0.1.0`, private.
+- Name: `steam-calendar`, private; версия приложения разрешается через `scripts/version.mjs`, а `package.json` служит fallback-источником версии.
 - `"type": "module"` для Node ESM, чтобы убрать `MODULE_TYPELESS_PACKAGE_JSON` warnings при Node tests.
 - Зависимости: `next`, `react`, `react-dom`, `cheerio`, `iron-session`, `server-only`.
 - Dev-зависимости: TypeScript, Tailwind/Turbopack, ESLint, Playwright, типы Node/React.
-- Основные скрипты: `dev`, `build`, `start`, `lint`, `typegen`, `test`, `check`, локальные dev/install/start, Docker scripts, `verify:calendar-session`, `measure:sqlite-latency`.
+- Основные скрипты: `dev`, `build`, `start`, `lint`, `typegen`, `test`, `check`, локальные dev/install/start, Docker scripts, desktop Linux/Windows packaging scripts, простые `build:all`, `build:linux`, `build:windows`, `verify:calendar-session`, `measure:sqlite-latency`.
 - `overrides` фиксирует проблемные версии транзитивных зависимостей для `typescript-eslint` и `cheerio`.
 
-### `plan.md`
-План оптимизации производительности `/calendar`:cold/warm замеры, узкие места wishlist/owned/appdetails, P0 параллелизация wishlist/owned, увеличение aggregate TTL, negative appdetails cache, пропуск wishlist page fallback, reuse prefetched appdetails, concurrency/env tuning, критерии успеха.
+
 
 ### `eslint.config.mjs`
 ESLint flat config:
@@ -119,20 +118,39 @@ Compose service `app`:
 - запускает `node .next/standalone/server.js`;
 - defaults `NODE_ENV=production`, `HOSTNAME=0.0.0.0`, `PORT=3000`, `DB_SQLITE_PATH=$PWD/data/steam-calendar.sqlite`.
 
+### `scripts/version.mjs`
+Единый version resolver:
+- `get` печатает разрешенную версию без `v` prefix;
+- `sync` записывает версию в `package.json`, `package-lock.json`, desktop Cargo config и Tauri configs;
+- версия разрешается из `STEAM_CALENDAR_VERSION`, `APP_VERSION`, `VERSION_INPUT`, `VERSION`, GitHub Actions tag env, exact git tag at `HEAD` и fallback `package.json`.
+
 ### `scripts/verify-calendar-session.ts`
 Diagnostic/verification script для проверки upcoming/calendar candidates и Steam appdetails flow с сессией/steam id; запускается через `npm run verify:calendar-session`.
+
+### Desktop scripts
+
+- `build/all.sh`: builds all supported desktop platforms into `out/linux` and `out/windows`.
+- `build/linux.sh`: builds Linux desktop artifacts into `out/linux`.
+- `build/windows.sh`: builds the Windows NSIS installer into `out/windows`.
+- `scripts/desktop/build-linux-docker.sh`: builds the Linux desktop packaging image.
+- `scripts/desktop/export-linux-packages.sh`: exports Linux `.deb`, `.rpm` and AppImage artifacts into `out/linux`.
+- `scripts/desktop/build-arch-package.sh`: converts the exported `.deb` into an Arch package and optionally verifies it.
+- `scripts/desktop/build-windows-docker.sh`: builds the Windows cross-build image using `cargo-xwin` and NSIS.
+- `scripts/desktop/export-windows-packages.sh`: exports the NSIS installer into `out/windows`.
 
 ## GitHub Actions
 
 ### `.github/workflows/docker.yml`
-Workflow "Build and publish container image":
-- triggers: push `main`/`master`, push tags `v*`, pull requests to `main`/`master`, `workflow_dispatch`;
-- Node 24 setup и `npm ci`;
-- выполняет `npm run check`;
-- затем Buildx, metadata, login to GHCR (для non-PR), build/push image `ghcr.io/<owner>/steam-calendar`;
-- tags include branch, PR, semver, SHA, `latest` для default branch;
-- на PR Docker image собирается, но не публикуется;
-- пишет summary с image tags.
+Workflow "Publish release by button":
+- triggers: только `workflow_dispatch`;
+- автоматические push/tag/PR сборки отключены;
+- `preflight` job разрешает `version` и `tag` через `scripts/version.mjs`, а затем считает `major`, `minor`, `major_minor` и `prerelease` из разрешенной версии и input `prerelease`;
+- `checks` job выполняет `npm ci` и `npm run check`;
+- `docker` job по input `publish_docker` собирает и публикует image `ghcr.io/<owner>/steam-calendar`;
+- Docker tags для ручной публикации: exact version, `major.minor`, `major`, `sha-<short-sha>`, и `latest` только если `publish_latest=true` и `prerelease=false`;
+- `desktop` job по input `publish_release` собирает Linux `.deb`, `.rpm`, AppImage и Windows NSIS setup `.exe` через существующие desktop Docker-скрипты;
+- `release` job по input `publish_release` создает или обновляет GitHub release и загружает desktop-пакеты как release assets;
+- summary job пишет release URL.
 
 ## Docs
 
@@ -150,6 +168,9 @@ Workflow "Build and publish container image":
 - `wishlistdata/?p=0` без cookies ненадёжен и может вернуть HTML;
 - metadata enrichment через `store.steampowered.com/api/appdetails`;
 - описана эталонная Python-реализация в `scripts/public_wishlist_api.py`.
+
+### `desktop_version/linux/README.md`
+Документация desktop-сборок: Linux packaging через Docker для `.deb`, AppImage, `.rpm` и Arch package, артефакты в `out/linux`, headless runtime check, sidecar behavior, Tauri WebView behavior для `DesktopExternalLinks`/`shell:default`, Windows cross-build через Docker/cargo-xwin и NSIS installer в `out/windows`.
 
 ## API routes
 
@@ -212,7 +233,7 @@ Private ICS calendar export:
 
 ### `app/actions/calendar-feed.ts`
 Server actions для приватного calendar feed:
-- `createCalendarFeedLink(formData)`: требует session, создаёт feed token, генерирует `/calendar/ics?token=...` URL и редиректит в Google Calendar import URL через `googleCalendarImportUrl(feedUrl)`; если origin неизвестен — редирект обратно на `/calendar` с `feed=created`;
+- `createCalendarFeedLink(formData)`: требует session, создаёт feed token и редиректит обратно на `/calendar` с `feed=created`; при успешном создании токена добавляет `openGoogle=1`, чтобы `/calendar` показал локальную панель с явной ссылкой на Google Calendar и кнопкой возврата в приложение;
 - `revokeCalendarFeedLink(formData)`: требует session и удаляет feed token, затем редирект на `/calendar` с `feed=revoked`.
 
 ### `app/actions/calendar-view.ts`
@@ -248,9 +269,9 @@ Binary favicon приложения. Файл не описывается как
 Root layout App Router.
 - Импортирует `globals.css`, настраивает `Geist`/`Geist_Mono` CSS variables.
 - `generateMetadata()` читает session/lang и возвращает локализованные `title`/`description` через `getT(session?.steamId)`.
-- `RootLayout` получает Steam session, lang, signed-in state, wishlist total для header без refresh (`refresh: false`), и передаёт их в `Header`.
-- Для signed-in user в header передаётся `wishlistTotal` без тяжёлых `items`/`discounts`, чтобы не тянуть полный список в layout: `items: []`, `discounts: []`.
-- Оборачивает приложение в `<html lang={lang}>`, body shell с dark/light colors, `ViewportMetrics`, `Header`, `<main class="app-shell">` и footer.
+- `RootLayout` получает Steam session, lang, signed-in state, wishlist total для header без refresh (`refresh: false`), theme preference и передаёт их в `Header`.
+- Для signed-in user в header передаётся полный `wishlistTotal` с `items`/`discounts`, чтобы header counter мог открывать wishlist modal без дополнительного initial fetch.
+- Оборачивает приложение в `<html lang={lang}>`, body shell с dark/light colors, `ViewportMetrics`, `DesktopExternalLinks`, `Header`, `<main class="app-shell">` и footer.
 
 ### `app/page.tsx`
 Home page `/`.
@@ -267,8 +288,9 @@ Main calendar page `/calendar`, `dynamic = "force-dynamic"`.
 - View выбирается как `parseView(searchParams.view) ?? cookieView`.
 - Читает request headers и external origin для calendar feed URL.
 - Получает `calendarFeet token` через `getCalendarFeedToken(session.steamId)`.
-- Если feed token уже есть, показывает subscribe link к Google Calendar import URL (`?cid=feed:...`) или fallback `.ics`; также показывает `details` management panel с readonly feed URL, `.ics` link и revoke form.
-- Если feed token нет, показывает form, вызывающий `createCalendarFeedLink`, чтобы создать token и затем перейти в Google import.
+- Если feed token уже есть, показывает subscribe link к Google Calendar import URL (`?cid=feed:...`) или fallback `.ics`; внешние Google links помечаются `data-external="true"` для desktop interceptor; также показывает `details` management panel с readonly feed URL, `.ics` link и revoke form.
+- Если feed token нет, показывает form, вызывающий `createCalendarFeedLink`, чтобы создать token и вернуться на локальную calendar страницу с `openGoogle=1`.
+- Показывает локальную Google-open панель при `openGoogle=1` и известном feed URL: кнопка возврата на `calendarBackPath` и явная external link `data-external="true"`.
 - Показывает flash сообщения `?feed=created` и `?feed=revoked`.
 - Всегда показывает download link `/calendar/ics` и `CalendarViewToggle`.
 - Оборачивает `CalendarFeed` в `<Suspense fallback={<CalendarFeedSkeleton view={view} />}>`, чтобы тяжелая сборка upcoming games не блокировала rendering shell-страницы.
@@ -282,11 +304,18 @@ Next.js loading boundary для `/calendar`.
 Settings page `/settings`.
 - Требует Steam session; при отсутствии редиректит `/auth/login`.
 - Читает `searchParams.saved`, показывает green flash если settings сохранены.
-- Рендерит form с server action `saveSettings`.
+- Рендерит отдельную theme form `action="/theme" method="post"` с radio options `light`, `dark`, `system` и save button.
+- Рендерит отдельные независимые forms с server action `saveSettings` для Steam API key, RAWG API key и store country code.
 - Показывает status badges для Steam API key, RAWG API key и store country code (`saved`/`notSet`).
 - Steam API key и RAWG key inputs всегда пустые (`defaultValue=""`) и type password.
 - Store country code input limited to 2 letters и показывает formatted value через `formatSteamStoreCc`.
-- Для каждого saved значения показывает отдельный submit button с `name="remove"`, `value="steam"|"rawg"|"store"` для удаления из сохранённых settings.
+- Для каждого saved значения показывает отдельный remove form с submit button `name="remove"`, `value="steam"|"rawg"|"store"` для удаления из сохранённых settings.
+
+### `app/theme/route.ts`
+Route handler for POST `/theme`.
+- Reads `theme` from form data and normalizes it through `parseThemePreference(...)`.
+- Saves explicit `light`/`dark` preference in the `ui_theme` cookie; deletes the cookie for `system`.
+- Redirects back to the referer origin when safe, otherwise to the external origin root.
 
 ## Components
 
@@ -296,8 +325,21 @@ Server component header, рендерится из `app/layout.tsx`.
 - Показывает links `/calendar` и `/settings`.
 - Рендерит `WishlistPriceCounter` с `key={counterKey}`, где key собран из signedIn, storeCc, ready status, total/discount/currency/counts, чтобы сбрасывать client state при смене session/settings/total.
 - Показывает lang switcher form POST `/auth/lang` с кнопкой `lang=en|ru`.
+- Показывает `ThemeToggleButton` с `label={t("theme.toggle")}` как одну кнопку-иконку переключения `light`/`dark`.
 - Если signed in, показывает avatar/display name и logout form POST `/auth/logout`.
 - Если not signed in, показывает login link `/auth/login`.
+
+### `components/ThemeToggleButton.tsx`
+Client component single theme icon button used in `Header`.
+- Renders one `<form action="/theme">` with a hidden `theme` input.
+- The button submits explicit `light` or `dark`; for saved `system` preference the client reads `document.documentElement.classList.contains("dark")` and stores the opposite explicit theme in the hidden input on submit.
+- Uses Tailwind dark variants on sun/moon SVG icons so one button shows the correct icon for the current dark/light state.
+
+### `components/DesktopExternalLinks.tsx`
+Client component with no rendered output, mounted in `app/layout.tsx`.
+- Active only inside Tauri when `window.__TAURI__?.shell?.open` exists.
+- Intercepts clicks on anchors marked `data-external="true"` and opens those `http(s)` URLs through `window.__TAURI__.shell.open`.
+- Does not intercept local sidecar links or ordinary browser behavior outside Tauri.
 
 ### `components/WishlistPriceCounter.tsx`
 Client component header wishlist total counter.
@@ -627,6 +669,15 @@ Client component game card/modal renderer.
 - Проверяет генерацию `/calendar/ics?token=...`, абсолютного feed URL и Google Calendar import URL.
 - Проверяет percent-encoding токена и feed URL.
 
+### `tests/google-calendar-desktop.test.ts`
+- Проверяет, что `createCalendarFeedLink` не редиректит напрямую в Google Calendar import URL, а возвращает пользователя на локальный `/calendar?feed=created&openGoogle=1`.
+- Проверяет локальную панель `/calendar` с `calendarBackPath`, `calendar.google.back`, `calendar.google.open` и `data-external="true"`.
+- Проверяет, что layout монтирует `DesktopExternalLinks`, interceptor открывает только `a[data-external="true"]` через `window.__TAURI__.shell.open`, и Tauri capabilities включают `shell:default`.
+
+### `tests/header-wishlist-total.test.ts`
+- Проверяет, что `app/layout.tsx` передаёт полный `wishlistTotal` в `Header` без очистки `items`/`discounts`.
+- Проверяет, что header counter может открыть wishlist modal из initial items.
+
 ### `tests/ical.test.ts`
 - Проверяет генерацию ICS.
 - В календарь попадают только игры с точной датой; year-only и бездатные исключаются; проверяется завершение файла `END:VCALENDAR\r\n`.
@@ -642,6 +693,14 @@ Client component game card/modal renderer.
 ### `tests/release-dates.test.ts`
 - Проверяет разбор Steam-дат и фильтры прошедших релизов.
 - Проверяет точные текстовые даты, отсутствие выдумывания точной даты для года/месяца, понижение плейсхолдера `YYYY-12-31`, границу «сегодня включительно».
+
+### `tests/settings-save-flow.test.ts`
+- Проверяет независимые save/remove формы на `/settings`.
+- Проверяет, что последовательные сохранения Steam/RAWG/store не затирают друг друга.
+
+### `tests/theme-toggle.test.ts`
+- Проверяет, что header использует один theme icon button с hidden input и submit handler.
+- Проверяет radio theme options на `/settings` и наличие theme translation keys в ru/en dictionaries.
 
 ### `tests/steam-profile.test.ts`
 - Проверяет парсинг og-метатегов Steam профиля и нормализацию имени/аватара.

@@ -18,7 +18,9 @@
 /out/
 
 # production
-/build
+/build/*
+!/build/*.sh
+!/build/**/*.sh
 
 # misc
 .DS_Store
@@ -73,6 +75,10 @@ next-env.d.ts
 /shots-report.json
 /shots*.json
 /fonts-local.conf
+/.tmp-*
+/.tmp-validation/
+/steam-api-key-test.md
+/timeouts.md
 
 # temporary local scripts
 /scripts/*tmp*
@@ -89,3 +95,9 @@ next-env.d.ts
 /.pw-browsers/
 /playwright-report/
 /test-results/
+
+# linux desktop build artifacts
+/desktop_version/linux/.build/
+/desktop_version/linux/dist/
+/desktop_version/linux/src-tauri/target/
+/desktop_version/linux/src-tauri/binaries/

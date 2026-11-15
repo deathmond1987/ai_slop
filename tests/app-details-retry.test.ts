@@ -49,10 +49,10 @@ test("appdetails retry queue rejects invalid and duplicate requests", () => {
     () => {
       configureAppDetailsRetry({ retry: async () => "succeeded" });
 
-      assert.equal(enqueueAppDetailsRetry({ appid: 0, steamId: "76561197960287930" }), false);
+      assert.equal(enqueueAppDetailsRetry({ appid: 0, steamId: "10000000000000003" }), false);
       assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "bad" }), false);
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), true);
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), false);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), true);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), false);
 
       const stats = appDetailsRetryQueueStats();
       assert.equal(stats.queued, 1);
@@ -73,10 +73,10 @@ test("appdetails retry queue is bounded by queue and unique steam id limits", ()
     () => {
       configureAppDetailsRetry({ retry: async () => "succeeded" });
 
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), true);
-      assert.equal(enqueueAppDetailsRetry({ appid: 730, steamId: "76561197960287931" }), false);
-      assert.equal(enqueueAppDetailsRetry({ appid: 730, steamId: "76561197960287930" }), true);
-      assert.equal(enqueueAppDetailsRetry({ appid: 100, steamId: "76561197960287930" }), false);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), true);
+      assert.equal(enqueueAppDetailsRetry({ appid: 730, steamId: "10000000000000004" }), false);
+      assert.equal(enqueueAppDetailsRetry({ appid: 730, steamId: "10000000000000003" }), true);
+      assert.equal(enqueueAppDetailsRetry({ appid: 100, steamId: "10000000000000003" }), false);
 
       const stats = appDetailsRetryQueueStats();
       assert.equal(stats.queued, 2);
@@ -98,7 +98,7 @@ test("appdetails retry queue honors max attempts and stops after exhaustion", as
     async () => {
       configureAppDetailsRetry({ retry: async () => "retry" as AppDetailsRetryOutcome });
 
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), true);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), true);
 
       const now = Date.now();
       assert.equal(await processAppDetailsRetries(now + 1), 1);
@@ -131,7 +131,7 @@ test("appdetails retry queue calls success handlers after terminal success", asy
         },
       });
 
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), true);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), true);
       assert.equal(await processAppDetailsRetries(Date.now() + 1), 1);
 
       const stats = appDetailsRetryQueueStats();
@@ -154,7 +154,7 @@ test("appdetails retry queue does not enqueue when retries are disabled", () => 
     },
     () => {
       configureAppDetailsRetry({ retry: async () => "succeeded" });
-      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "76561197960287930" }), false);
+      assert.equal(enqueueAppDetailsRetry({ appid: 440, steamId: "10000000000000003" }), false);
       assert.equal(appDetailsRetryQueueStats().queued, 0);
     }
   );

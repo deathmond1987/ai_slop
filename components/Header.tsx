@@ -1,12 +1,15 @@
 import Image from "next/image";
 import Link from "next/link";
 import { tFor } from "@/lib/i18n";
+import type { ThemePreference } from "@/lib/theme-mode";
 import type { Lang } from "@/lib/types";
 import type { WishlistTotalResponse } from "@/lib/wishlist-total";
 import { WishlistPriceCounter } from "./WishlistPriceCounter";
+import { ThemeToggleButton } from "./ThemeToggleButton";
 
 export function Header({
   lang,
+  theme,
   signedIn,
   displayName,
   avatar,
@@ -14,6 +17,7 @@ export function Header({
   initialTotal,
 }: {
   lang: Lang;
+  theme: ThemePreference;
   signedIn: boolean;
   displayName?: string;
   avatar?: string;
@@ -58,6 +62,7 @@ export function Header({
           privateLabel={t("error.wishlistHidden")}
           unavailableLabel={t("wishlist.unavailable")}
         />
+        <ThemeToggleButton theme={theme} label={t("theme.toggle")} />
         <form action="/auth/lang" method="post" className="flex items-center gap-1">
           <button
             type="submit"

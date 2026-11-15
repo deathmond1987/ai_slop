@@ -1,9 +1,11 @@
 import "server-only";
+import { getCurrentRequestId } from "./request-context";
 
 const secretQueryPattern =
   /([?&](?:key|api_key|steam_api_key|rawg_api_key|session_password|db_encryption_key)=)[^&\s]+/gi;
+const steamIdTextPattern = /765611[0-9]{11}/g;
 const secretFieldPattern =
-  /^(steam_api_key|rawg_api_key|api_key|session_password|db_encryption_key|steamApiKey|rawgApiKey|apiKey|secret|authorization|cookie|.*cipher)$/i;
+  /^(steam_api_key|rawg_api_key|api_key|session_password|db_encryption_key|steamApiKey|rawgApiKey|apiKey|secret|authorization|cookie|steamId|steamid|steamIds|steamids|steam_ids|.*cipher)$/i;
 
 function debugEnabled(): boolean {
   const raw = process.env.APP_DEBUG;
@@ -12,7 +14,9 @@ function debugEnabled(): boolean {
 }
 
 export function sanitizeDebugText(value: string): string {
-  return value.replace(secretQueryPattern, "$1redacted");
+  return value
+    .replace(steamIdTextPattern, "[redacted-steamid]")
+    .replace(secretQueryPattern, "$1redacted");
 }
 
 export function sanitizeDebugError(error: unknown): string {
@@ -57,8 +61,23 @@ function serializeDebugData(data: unknown): string {
   }
 }
 
+function withRequestId(data: unknown): unknown {
+  const requestId = getCurrentRequestId();
+  if (!requestId) return data;
+  if (data === undefined) return { requestId };
+  if (data === null) return { requestId, data: null };
+  if (typeof data !== "object") return { requestId, data };
+  if (data instanceof Error) return { requestId, error: data };
+  if (Array.isArray(data) || ArrayBuffer.isView(data)) return { requestId, data };
+
+  const record = data as Record<string, unknown>;
+  if (record.requestId) return data;
+
+  return { ...record, requestId };
+}
+
 export function logDebug(message: string, data?: unknown): void {
   if (!debugEnabled()) return;
   const now = new Date();
-  process.stdout.write(`[debug] ${now.toISOString()} t=${now.getTime()} ${sanitizeDebugText(message)}${serializeDebugData(data)}\n`);
+  process.stdout.write(`[debug] ${now.toISOString()} t=${now.getTime()} ${sanitizeDebugText(message)}${serializeDebugData(withRequestId(data))}\n`);
 }

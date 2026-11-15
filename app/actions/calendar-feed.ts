@@ -1,18 +1,12 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import {
   createCalendarFeedToken,
   revokeCalendarFeedToken,
 } from "@/lib/auth-store";
-import {
-  calendarFeedUrl,
-  googleCalendarImportUrl,
-} from "@/lib/calendar-feed-link";
 import { logDebug } from "@/lib/debug";
 import { parseView } from "@/lib/display-mode";
-import { getExternalOriginFromHeaders } from "@/lib/requestOrigin";
 import { requireSteamSession } from "@/lib/session";
 
 function monthFromFormData(formData: FormData): string | undefined {
@@ -27,11 +21,16 @@ function viewFromFormData(formData: FormData): "grid" | "list" {
   return parseView(typeof raw === "string" ? raw : undefined) ?? "grid";
 }
 
-function redirectFeedLink(status: "created" | "revoked", formData: FormData): never {
+function redirectFeedLink(
+  status: "created" | "revoked",
+  formData: FormData,
+  openGoogle = false,
+): never {
   const params = new URLSearchParams({ feed: status });
   const month = monthFromFormData(formData);
   if (month) params.set("month", month);
   params.set("view", viewFromFormData(formData));
+  if (openGoogle) params.set("openGoogle", "1");
   redirect(`/calendar?${params.toString()}`);
 }
 
@@ -48,15 +47,8 @@ export async function createCalendarFeedLink(formData: FormData): Promise<void> 
     redirectFeedLink("created", formData);
   }
 
-  const origin = getExternalOriginFromHeaders(await headers());
-  const feedUrl = origin ? calendarFeedUrl(origin, token) : undefined;
-  if (feedUrl) {
-    logDebug("calendarFeed.create.google_redirect", { hasOrigin: true });
-    redirect(googleCalendarImportUrl(feedUrl));
-  }
-
-  logDebug("calendarFeed.create.done", { hasOrigin: false });
-  redirectFeedLink("created", formData);
+  logDebug("calendarFeed.create.done");
+  redirectFeedLink("created", formData, true);
 }
 
 export async function revokeCalendarFeedLink(formData: FormData): Promise<void> {

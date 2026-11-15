@@ -11,6 +11,13 @@ export async function resolve(specifier, context, nextResolve) {
     };
   }
 
+  if (specifier === "next/server") {
+    return {
+      url: new URL("../node_modules/next/server.js", import.meta.url).href,
+      shortCircuit: true,
+    };
+  }
+
   if (
     (specifier.startsWith("./") || specifier.startsWith("../")) &&
     !/\.[a-z0-9]+$/i.test(specifier)

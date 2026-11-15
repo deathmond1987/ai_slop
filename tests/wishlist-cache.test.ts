@@ -4,7 +4,7 @@ import { shortHash } from "../lib/aggregate-cache.ts";
 import { wishlistCacheKey, wishlistStoreCcHash } from "../lib/wishlist-cache-core.ts";
 
 test("wishlist cache keys include normalized storeCc only when present", () => {
-  const steamId = "10000000012345678";
+  const steamId = "10000000000000005";
   const base = `wishlist:v2:${steamId}`;
 
   assert.equal(wishlistStoreCcHash(undefined), undefined);

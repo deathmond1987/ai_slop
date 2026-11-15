@@ -272,4 +272,3 @@ test("Steam appdetails download params hide debug state by default and expose wh
     }
   );
 });
-

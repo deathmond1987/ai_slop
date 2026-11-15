@@ -16,7 +16,7 @@ import {
 register(new URL("./ts-extension-resolver.mjs", import.meta.url).href, import.meta.url);
 
 const tempDir = mkdtempSync(path.join(os.tmpdir(), "steam-calendar-auth-flow-"));
-const steamId = "10000000015461483";
+const steamId = "10000000000000001";
 
 process.env.DB_SQLITE_PATH = path.join(tempDir, "auth-flow.sqlite");
 process.env.DB_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);

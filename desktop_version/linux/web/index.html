@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Steam Calendar</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #0b1020;
+        color: #e7edf8;
+      }
+
+      main {
+        width: min(520px, calc(100vw - 32px));
+        padding: 28px;
+        border: 1px solid rgba(231, 237, 248, 0.16);
+        border-radius: 18px;
+        background: rgba(17, 24, 39, 0.86);
+        box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 28px;
+      }
+
+      p {
+        margin: 0;
+        line-height: 1.55;
+        color: #b8c2d0;
+      }
+
+      .status {
+        margin: 18px 0 24px;
+        padding: 12px 14px;
+        border-radius: 12px;
+        background: rgba(47, 129, 247, 0.14);
+        color: #dce7ff;
+        font-variant-numeric: tabular-nums;
+      }
+
+      button {
+        appearance: none;
+        border: 1px solid rgba(47, 129, 247, 0.45);
+        border-radius: 12px;
+        padding: 10px 14px;
+        background: #2f81f7;
+        color: #ffffff;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      button[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Steam Calendar</h1>
+      <p>Starting the local app sidecar. This page will redirect automatically.</p>
+      <div class="status" id="status">Starting...</div>
+      <button id="restart" type="button" hidden>Restart sidecar</button>
+    </main>
+
+    <script>
+      const statusEl = document.getElementById("status");
+      const restartBtn = document.getElementById("restart");
+
+      function showError(message) {
+        statusEl.textContent = message;
+        restartBtn.hidden = false;
+      }
+
+      async function restartSidecar() {
+        restartBtn.disabled = true;
+        statusEl.textContent = "Restarting...";
+
+        try {
+          await window.__TAURI__.core.invoke("restart_sidecar");
+          restartBtn.disabled = false;
+          statusEl.textContent = "Restart requested";
+        } catch (error) {
+          restartBtn.disabled = false;
+          showError("Restart failed: " + String(error));
+        }
+      }
+
+      restartBtn.addEventListener("click", restartSidecar);
+
+      async function pollSidecar() {
+        if (!window.__TAURI__?.core?.invoke) {
+          showError("Tauri IPC is not available. Run this app with the Tauri CLI.");
+          return;
+        }
+
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+          try {
+            const status = await window.__TAURI__.core.invoke("sidecar_status");
+
+            if (status.status === "ready") {
+              statusEl.textContent = "Connected to port " + status.port;
+              window.location.replace("http://127.0.0.1:" + status.port + "/");
+              return;
+            }
+
+            if (status.status === "failed" || status.status === "exited" || status.status === "idle") {
+              showError(
+                "Sidecar status: " +
+                  status.status +
+                  ". Log: " +
+                  status.log_path
+              );
+              return;
+            }
+
+            statusEl.textContent = "Sidecar status: " + status.status + " (port " + status.port + ")";
+          } catch (error) {
+            showError("Could not contact the desktop sidecar: " + String(error));
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+
+        showError("Timed out while waiting for the sidecar to become ready.");
+      }
+
+      pollSidecar();
+    </script>
+  </body>
+</html>
