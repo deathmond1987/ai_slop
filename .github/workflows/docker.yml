@@ -573,22 +573,22 @@ jobs:
                 asset="$(basename "${asset_path}")"
                 case "${asset}" in
                   *.deb)
-                    target="Debian/Ubuntu `.deb`"
+                    target='Debian/Ubuntu `.deb`'
                     ;;
                   *.rpm)
-                    target="RHEL/Fedora `.rpm`"
+                    target='RHEL/Fedora `.rpm`'
                     ;;
                   *.AppImage)
-                    target="Universal AppImage"
+                    target='Universal AppImage'
                     ;;
                   *.pkg.tar.zst)
-                    target="Arch Linux `.pkg.tar.zst`"
+                    target='Arch Linux `.pkg.tar.zst`'
                     ;;
                   *.exe)
-                    target="Windows NSIS setup `.exe`"
+                    target='Windows NSIS setup `.exe`'
                     ;;
                   *)
-                    target="Desktop package"
+                    target='Desktop package'
                     ;;
                 esac
                 printf -- '- `%s` — %s\n' "${asset}" "${target}"
