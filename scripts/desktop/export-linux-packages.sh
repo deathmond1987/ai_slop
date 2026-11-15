@@ -107,7 +107,7 @@ if [ "$EXPORT_KIND" = "all" ] || [ "$EXPORT_KIND" = "arch" ]; then
     echo "Run scripts/desktop/export-linux-packages.sh with EXPORT_KIND=all or EXPORT_KIND=deb first." >&2
     exit 1
   fi
-  VERIFY_ARCH="${VERIFY_ARCH:-0}" DEB_FILE="$deb_file" bash scripts/desktop/build-arch-package.sh
+IMAGE="archlinux:latest" VERIFY_ARCH="${VERIFY_ARCH:-0}" DEB_FILE="$deb_file" bash scripts/desktop/build-arch-package.sh
 fi
 
 case "$EXPORT_KIND" in
