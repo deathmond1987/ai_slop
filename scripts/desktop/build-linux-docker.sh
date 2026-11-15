@@ -5,8 +5,17 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-linux-build:latest}"
+BASE_IMAGE="${BASE_IMAGE:-steam-calendar-desktop-base:latest}"
 DOCKERFILE="${DOCKERFILE:-desktop_version/linux/Dockerfile.build}"
 
 node scripts/version.mjs sync
 
-docker build -f "$DOCKERFILE" -t "$IMAGE" .
+if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
+  IMAGE="$BASE_IMAGE" bash scripts/desktop/build-desktop-base.sh
+fi
+
+docker build \
+  -f "$DOCKERFILE" \
+  --build-arg "BASE_IMAGE=$BASE_IMAGE" \
+  -t "$IMAGE" \
+  .

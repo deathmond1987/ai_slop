@@ -1,0 +1,9 @@
+FROM node:24-bookworm
+
+WORKDIR /workspace
+
+COPY . .
+
+RUN npm ci
+RUN npm run build
+RUN node desktop_version/linux/scripts/gen-icons.mjs

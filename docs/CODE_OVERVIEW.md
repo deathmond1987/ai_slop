@@ -148,8 +148,9 @@ Workflow "Publish release by button":
 - `checks` job выполняет `npm ci` и `npm run check`;
 - `docker` job по input `publish_docker` собирает и публикует image `ghcr.io/<owner>/steam-calendar`;
 - Docker tags для ручной публикации: exact version, `major.minor`, `major`, `sha-<short-sha>`, и `latest` только если `publish_latest=true` и `prerelease=false`;
-- `desktop` job по input `publish_release` собирает Linux `.deb`, `.rpm`, AppImage и Windows NSIS setup `.exe` через существующие desktop Docker-скрипты;
-- `release` job по input `publish_release` создает или обновляет GitHub release и загружает desktop-пакеты как release assets;
+- `desktop-base`, `desktop-linux-builder` и `desktop-windows-builder` job по input `publish_release` публикуют базовый desktop image и builder images в GHCR;
+- export jobs по input `publish_release` собирают артефакты: `desktop-linux-deb-packages` для Debian/Ubuntu `.deb`, `desktop-linux-rpm-packages` для RHEL/Fedora `.rpm`, `desktop-linux-appimage-packages` для universal AppImage, `desktop-arch-packages` для Arch Linux `.pkg.tar.zst`, `desktop-windows-packages` для Windows NSIS setup `.exe`;
+- `release` job по input `publish_release` скачивает desktop artifacts, создает или обновляет GitHub release и загружает desktop-пакеты как release assets;
 - summary job пишет release URL.
 
 ## Docs

@@ -1,4 +1,6 @@
-FROM node:24-bookworm
+ARG BASE_IMAGE=steam-calendar-desktop-base:latest
+
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CARGO_HOME=/usr/local/cargo
@@ -29,15 +31,11 @@ RUN rustup target add x86_64-pc-windows-msvc
 RUN cargo install --locked cargo-xwin
 RUN cargo-xwin --version
 
-WORKDIR /workspace
 COPY . .
 
 RUN mkdir -p /usr/share/nsis/Include/Win && \
   cp /workspace/desktop_version/linux/nsis/Win/RestartManager.nsh /usr/share/nsis/Include/Win/RestartManager.nsh
 
-RUN npm ci
-RUN npm run build
-RUN node desktop_version/linux/scripts/gen-icons.mjs
 RUN node desktop_version/linux/scripts/fetch-windows-node.mjs
 RUN node desktop_version/linux/scripts/build-sidecar.mjs
 

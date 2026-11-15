@@ -43,6 +43,11 @@ jobs:
       minor: ${{ steps.meta.outputs.minor }}
       major_minor: ${{ steps.meta.outputs.major_minor }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
+      image_path: ${{ steps.meta.outputs.image_path }}
+      desktop_base_image_path: ${{ steps.meta.outputs.desktop_base_image_path }}
+      desktop_linux_builder_image_path: ${{ steps.meta.outputs.desktop_linux_builder_image_path }}
+      desktop_windows_builder_image_path: ${{ steps.meta.outputs.desktop_windows_builder_image_path }}
+      run_tag: ${{ steps.meta.outputs.run_tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -87,6 +92,13 @@ jobs:
           minor="${BASH_REMATCH[2]}"
           major_minor="${major}.${minor}"
 
+          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image_path="${owner}/steam-calendar"
+          desktop_base_image_path="${owner}/steam-calendar-desktop-base"
+          desktop_linux_builder_image_path="${owner}/steam-calendar-linux-build"
+          desktop_windows_builder_image_path="${owner}/steam-calendar-windows-build"
+          run_tag="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+
           {
             echo "version=${version}"
             echo "tag=${tag}"
@@ -94,6 +106,11 @@ jobs:
             echo "minor=${minor}"
             echo "major_minor=${major_minor}"
             echo "prerelease=${prerelease}"
+            echo "image_path=${image_path}"
+            echo "desktop_base_image_path=${desktop_base_image_path}"
+            echo "desktop_linux_builder_image_path=${desktop_linux_builder_image_path}"
+            echo "desktop_windows_builder_image_path=${desktop_windows_builder_image_path}"
+            echo "run_tag=${run_tag}"
           } >> "${GITHUB_OUTPUT}"
 
   checks:
@@ -123,7 +140,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     outputs:
-      image_path: ${{ steps.image.outputs.IMAGE_PATH }}
+      image_path: ${{ needs.preflight.outputs.image_path }}
       image_tags: ${{ steps.meta.outputs.tags }}
     steps:
       - name: Checkout
@@ -134,21 +151,12 @@ jobs:
         if: inputs.publish_docker
         uses: docker/setup-buildx-action@v3
 
-      - name: Set image name
-        if: inputs.publish_docker
-        id: image
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner="$(printf '%s' "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          echo "IMAGE_PATH=${owner}/steam-calendar" >> "${GITHUB_OUTPUT}"
-
       - name: Docker metadata
         if: inputs.publish_docker
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ steps.image.outputs.IMAGE_PATH }}
+          images: ghcr.io/${{ needs.preflight.outputs.image_path }}
           tags: |
             type=raw,value=${{ needs.preflight.outputs.version }}
             type=raw,value=${{ needs.preflight.outputs.major_minor }}
@@ -184,7 +192,7 @@ jobs:
         if: inputs.publish_docker
         shell: bash
         env:
-          IMAGE_PATH: ${{ steps.image.outputs.IMAGE_PATH }}
+          IMAGE_PATH: ${{ needs.preflight.outputs.image_path }}
           IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
         run: |
           set -euo pipefail
@@ -196,59 +204,328 @@ jobs:
             printf '```\n'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  desktop:
-    name: Build ${{ matrix.platform }} desktop packages
+  desktop-base:
+    name: Build shared desktop base image
     needs: [preflight, checks]
     if: inputs.publish_release
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - linux
-          - windows
-        include:
-          - platform: linux
-            build_script: scripts/desktop/build-linux-docker.sh
-            export_script: scripts/desktop/export-linux-packages.sh
-            image: steam-calendar-linux-build:latest
-            out_dir: out/linux
-          - platform: windows
-            build_script: scripts/desktop/build-windows-docker.sh
-            export_script: scripts/desktop/export-windows-packages.sh
-            image: steam-calendar-windows-build:latest
-            out_dir: out/windows
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build builder image
-        shell: bash
-        env:
-          IMAGE: ${{ matrix.image }}
-          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
-        run: bash "${{ matrix.build_script }}"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-      - name: Export desktop packages
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync version metadata
         shell: bash
         env:
-          IMAGE: ${{ matrix.image }}
-          OUT_DIR: ${{ matrix.out_dir }}
           STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/version.mjs sync
+
+      - name: Build and push desktop base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: desktop_version/linux/Dockerfile.base
+          push: true
+          tags: |
+            ghcr.io/${{ needs.preflight.outputs.desktop_base_image_path }}:${{ needs.preflight.outputs.run_tag }}
+            ghcr.io/${{ needs.preflight.outputs.desktop_base_image_path }}:${{ needs.preflight.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=steam-calendar-desktop-base
+            org.opencontainers.image.description=Steam Calendar desktop base image
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=desktop-base
+          cache-to: type=gha,mode=max,scope=desktop-base
+
+  desktop-linux-builder:
+    name: Build Linux desktop builder image
+    needs: [preflight, checks, desktop-base]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync version metadata
+        shell: bash
+        env:
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/version.mjs sync
+
+      - name: Build and push Linux desktop builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: desktop_version/linux/Dockerfile.build
+          push: true
+          build-args: |
+            BASE_IMAGE=ghcr.io/${{ needs.preflight.outputs.desktop_base_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          tags: |
+            ghcr.io/${{ needs.preflight.outputs.desktop_linux_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+            ghcr.io/${{ needs.preflight.outputs.desktop_linux_builder_image_path }}:${{ needs.preflight.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=steam-calendar-linux-build
+            org.opencontainers.image.description=Steam Calendar Linux desktop builder image
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=desktop-linux-builder
+          cache-to: type=gha,mode=max,scope=desktop-linux-builder
+
+  desktop-windows-builder:
+    name: Build Windows desktop builder image
+    needs: [preflight, checks, desktop-base]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync version metadata
+        shell: bash
+        env:
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/version.mjs sync
+
+      - name: Build and push Windows desktop builder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: desktop_version/linux/Dockerfile.build.windows
+          push: true
+          build-args: |
+            BASE_IMAGE=ghcr.io/${{ needs.preflight.outputs.desktop_base_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          tags: |
+            ghcr.io/${{ needs.preflight.outputs.desktop_windows_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+            ghcr.io/${{ needs.preflight.outputs.desktop_windows_builder_image_path }}:${{ needs.preflight.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=steam-calendar-windows-build
+            org.opencontainers.image.description=Steam Calendar Windows desktop builder image
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=desktop-windows-builder
+          cache-to: type=gha,mode=max,scope=desktop-windows-builder
+
+  export-linux-deb:
+    name: Export Linux .deb package
+    needs: [preflight, checks, desktop-linux-builder]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export Linux .deb package
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.preflight.outputs.desktop_linux_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          PULL_IMAGE: 1
+          EXPORT_KIND: deb
+          OUT_DIR: out/linux
           VERSION: ${{ needs.preflight.outputs.version }}
-        run: bash "${{ matrix.export_script }}"
+        run: bash scripts/desktop/export-linux-packages.sh
 
-      - name: Upload desktop packages
+      - name: Upload Linux .deb package
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.platform }}-packages
-          path: ${{ matrix.out_dir }}
+          name: desktop-linux-deb-packages
+          path: out/linux
+          if-no-files-found: error
+
+  export-linux-rpm:
+    name: Export Linux .rpm package
+    needs: [preflight, checks, desktop-linux-builder]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export Linux .rpm package
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.preflight.outputs.desktop_linux_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          PULL_IMAGE: 1
+          EXPORT_KIND: rpm
+          OUT_DIR: out/linux
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash scripts/desktop/export-linux-packages.sh
+
+      - name: Upload Linux .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-rpm-packages
+          path: out/linux
+          if-no-files-found: error
+
+  export-linux-appimage:
+    name: Export Linux AppImage package
+    needs: [preflight, checks, desktop-linux-builder]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export Linux AppImage package
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.preflight.outputs.desktop_linux_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          PULL_IMAGE: 1
+          EXPORT_KIND: appimage
+          OUT_DIR: out/linux
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash scripts/desktop/export-linux-packages.sh
+
+      - name: Upload Linux AppImage package
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux-appimage-packages
+          path: out/linux
+          if-no-files-found: error
+
+  export-arch:
+    name: Export Arch Linux package
+    needs: [preflight, checks, export-linux-deb]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux .deb package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-linux-deb-packages
+          path: out/linux
+
+      - name: Export Arch Linux package
+        shell: bash
+        env:
+          IMAGE: archlinux:latest
+          PULL_IMAGE: 1
+          OUT_DIR: out/arch
+          PKG_NAME: steam-calendar
+          VERIFY_ARCH: 0
+        run: |
+          set -euo pipefail
+          deb_file="$(find out/linux -maxdepth 1 -type f -name 'steam-calendar_*.deb' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+          if [ -z "${deb_file}" ]; then
+            echo "Downloaded Linux .deb package not found." >&2
+            exit 1
+          fi
+          DEB_FILE="${deb_file}" bash scripts/desktop/build-arch-package.sh
+
+      - name: Upload Arch Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-arch-packages
+          path: out/arch
+          if-no-files-found: error
+
+  export-windows:
+    name: Export Windows installer
+    needs: [preflight, checks, desktop-windows-builder]
+    if: inputs.publish_release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export Windows installer
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ needs.preflight.outputs.desktop_windows_builder_image_path }}:${{ needs.preflight.outputs.run_tag }}
+          PULL_IMAGE: 1
+          OUT_DIR: out/windows
+          VERSION: ${{ needs.preflight.outputs.version }}
+        run: bash scripts/desktop/export-windows-packages.sh
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows-packages
+          path: out/windows
           if-no-files-found: error
 
   release:
     name: Publish GitHub release
-    needs: [preflight, checks, desktop, docker]
+    needs:
+      - preflight
+      - checks
+      - desktop-base
+      - desktop-linux-builder
+      - desktop-windows-builder
+      - export-linux-deb
+      - export-linux-rpm
+      - export-linux-appimage
+      - export-arch
+      - export-windows
+      - docker
     if: inputs.publish_release
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -293,7 +570,28 @@ jobs:
             if [ "${#assets[@]}" -gt 0 ]; then
               printf '## Desktop packages\n\n'
               for asset_path in "${assets[@]}"; do
-                printf -- '- `%s`\n' "$(basename "${asset_path}")"
+                asset="$(basename "${asset_path}")"
+                case "${asset}" in
+                  *.deb)
+                    target="Debian/Ubuntu `.deb`"
+                    ;;
+                  *.rpm)
+                    target="RHEL/Fedora `.rpm`"
+                    ;;
+                  *.AppImage)
+                    target="Universal AppImage"
+                    ;;
+                  *.pkg.tar.zst)
+                    target="Arch Linux `.pkg.tar.zst`"
+                    ;;
+                  *.exe)
+                    target="Windows NSIS setup `.exe`"
+                    ;;
+                  *)
+                    target="Desktop package"
+                    ;;
+                esac
+                printf -- '- `%s` — %s\n' "${asset}" "${target}"
               done
             fi
           } > release-notes.md

@@ -1,4 +1,6 @@
-FROM node:24-bookworm
+ARG BASE_IMAGE=steam-calendar-desktop-base:latest
+
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV CARGO_HOME=/usr/local/cargo
@@ -27,12 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
 
-WORKDIR /workspace
 COPY . .
 
-RUN npm ci
-RUN npm run build
-RUN node desktop_version/linux/scripts/gen-icons.mjs
 RUN node desktop_version/linux/scripts/build-sidecar.mjs
 
 RUN cd desktop_version/linux/.build/app && \
@@ -45,4 +43,4 @@ WORKDIR /workspace/desktop_version/linux/src-tauri
 RUN cargo build
 
 WORKDIR /workspace
-RUN npm run desktop:build:linux
+RUN npm run desktop:tauri:build:linux

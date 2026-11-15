@@ -22,6 +22,7 @@ after(() => {
 
 const authStore = await import("../lib/auth-store.ts");
 const pageSource = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
+const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("settings page keeps each saved setting independent from remove controls", () => {
   const settingNames = ["steamApiKey", "rawgApiKey", "storeCc"];
@@ -56,6 +57,64 @@ test("settings page keeps each saved setting independent from remove controls", 
   assert.ok(pageSource.includes('value="steam"'));
   assert.ok(pageSource.includes('value="rawg"'));
   assert.ok(pageSource.includes('value="store"'));
+});
+
+test("settings page uses compact calendar-like typography without page scroll", () => {
+  assert.ok(pageSource.includes('className="settings-page'));
+  assert.ok(pageSource.includes('settings-card'));
+  assert.ok(pageSource.includes('className="settings-control"'));
+  assert.ok(!pageSource.includes('className="text-2xl"'));
+  assert.ok(!pageSource.includes('className="text-sm"'));
+  assert.match(pageSource, /<h1 className="text-scale-11/);
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\)[\s\S]*?\.settings-card h2 \{[\s\S]*?font-size: var\(--text-scale-11\);/
+  );
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\)[\s\S]*?\.settings-card p \{[\s\S]*?font-size: var\(--text-scale-10\);/
+  );
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\) \{[\s\S]*?overflow: hidden;/
+  );
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\) main \{[\s\S]*?height: calc\(100dvh - var\(--layout-header-height\)\);/
+  );
+});
+
+test("settings store region uses exact selectable region values", () => {
+  const dictionaries = ["ru", "en"].map((lang) =>
+    JSON.parse(readFileSync(new URL(`../i18n/${lang}.json`, import.meta.url), "utf8")) as Record<
+      string,
+      unknown
+    >
+  );
+  const requiredKeys = [
+    "settings.storeCc.option.none",
+    "settings.storeCc.option.us",
+    "settings.storeCc.option.ua",
+    "settings.storeCc.option.ru",
+    "settings.storeCc.option.kz",
+  ];
+
+  assert.match(
+    pageSource,
+    /<select[\s\S]*?id="storeCc"[\s\S]*?name="storeCc"[\s\S]*?className="settings-control"/
+  );
+  assert.ok(pageSource.includes('value: "us"'));
+  assert.ok(pageSource.includes('value: "ua"'));
+  assert.ok(pageSource.includes('value: "ru"'));
+  assert.ok(pageSource.includes('value: "kz"'));
+  assert.ok(!pageSource.includes('pattern="[a-zA-Z]{0,2}"'));
+  assert.ok(!pageSource.includes("maxLength={2}"));
+
+  for (const dictionary of dictionaries) {
+    for (const key of requiredKeys) {
+      assert.ok(typeof dictionary[key] === "string" && dictionary[key]);
+    }
+  }
 });
 
 test("sequential settings saves preserve API keys and region", async () => {

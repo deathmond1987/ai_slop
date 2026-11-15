@@ -1,6 +1,6 @@
 [package]
 name = "steam-calendar-desktop"
-version = "1.0.4"
+version = "1.0.5"
 description = "Linux desktop wrapper for Steam Calendar"
 authors = ["Steam Calendar"]
 edition = "2021"

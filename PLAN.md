@@ -115,3 +115,100 @@
   - Linux `.deb`, `.rpm`, AppImage;
   - Windows NSIS setup `.exe`.
 - При `publish_release=true` workflow собирает desktop-пакеты и публикует их как GitHub release assets с тегом `v<version>`.
+
+## Новая фаза: 11 изменений
+
+**Проверка:** `npm run check` пройден: `152` tests pass, typegen/lint/build/auth render fallback passed; Docker workflow parsed and contains shared base, Linux/Windows builder, parallel export jobs and release dependencies.
+
+### 1. Переименовать настройки темы интерфейса
+
+**Статус:** выполнено; `i18n/ru.json` использует `Светлая`, `Тёмная`, `Системная`; `/settings` рендерит radio-выбор через `theme.light`, `theme.dark`, `theme.system`.
+
+- В русском интерфейсе заменить короткие названия тем `Свет`, `Тём`, `Авто` на полные `Светлая`, `Тёмная`, `Системная`.
+- Обновить подписки в календарной сетке и все русские метки темы, если они используют те же ключи.
+
+### 2. Перенести настройки языка из /calendar в /settings
+
+**Статус:** выполнено; `/calendar` больше не содержит отдельный language switcher, `/settings` содержит language form `action="/auth/lang"` с radio `ru`/`en`.
+
+- Убрать переключатель языка из области календаря/шапки, где это относится к языку приложения.
+- Добавить явный выбор языка в `/settings`.
+- Сохранять язык через существующий механизм cookie `LANG_COOKIE` и `saveUserLang`.
+
+### 3. Объединить действия календаря в одно меню подписки
+
+**Статус:** выполнено; `/calendar` использует `CalendarSubscriptionMenu` с подпиской Google Calendar, token URL, `.ics` подпиской, экспортом `.ics`, create/revoke token и тестом `tests/google-calendar-desktop.test.ts`.
+
+- Сделать одну кнопку `Подписка на календарь` или `Subscription Calendar` для всех вариантов подписки.
+- Внутри меню разместить:
+  - подписку на Google Calendar;
+  - настройку подписки/token URL;
+  - экспорт `.ics`.
+- Убрать лишние отдельные кнопки подписки/экспорта из шапки календаря.
+
+### 4. Разобраться с экспортом .ics и подпиской в Windows-приложении
+
+**Статус:** выполнено на уровне интерфейса и desktop link handling: единое меню использует `download`-ссылки для `.ics`, токенный feed помечен `data-external="true"`, Google Calendar открывается через `DesktopExternalLinks`/Tauri shell с локальным возвращением в приложение; локальная runtime-проверка Windows WebView не выполнялась.
+
+- Проверить поведение `download`-ссылки `/calendar/ics` и токенной подписки в Windows/Tauri WebView.
+- Сделать действия `.ics`, Google Calendar и manage subscription понятными в desktop-приложении.
+- Избежать ситуации, когда WebView открывает/теряет локальную ссылку без возможности вернуться или скачать файл.
+
+### 5. Удалить подпись `Powered by Steam Web API · OpenID · RAWG fallback`
+
+**Статус:** выполнено; подпись удалена, `app/layout.tsx` не содержит футер `Powered by Steam Web API · OpenID · RAWG fallback`.
+
+- Найти текстовый футер в `app/layout.tsx`.
+- Удалить строку целиком, чтобы внизу не отображалась текущая подпись.
+
+### 6. Переписать формулировки про даты выхода
+
+**Статус:** выполнено; `i18n/ru.json` использует `Выходит в {year} ({count})` и `Игры без даты выхода`, английские эквиваленты обновлены.
+
+- Заменить `Дата выхода ещё не объявлена` на `Игры без даты выхода`.
+- Заменить `Дата выхода запланирована на ____ год` на вариант `выходит в ____`.
+- Обновить русские переводы и при необходимости английские эквиваленты.
+
+### 7. Исправить размер ячеек в календарной сетке при нескольких играх
+
+**Статус:** выполнено; `components/CalendarGrid.tsx` использует фиксированные `minmax(min, max)` row tracks, `app/globals.css` ограничивает card/empty row height и overflow, тест `calendar row tracks are capped to fixed row heights` проходит.
+
+- В сетке календаря ограничить вертикальный размер ячейки с несколькими играми.
+- Цель: ячейка с играми декабря по высоте не должна быть больше ячейки ноября, которая сейчас выглядит эталонной.
+- Сохранить читаемость и использовать существующие CSS-переменные календарной сетки.
+
+### 8. Привести размеры шрифтов в настройках к размерам календаря
+
+**Статус:** выполнено; `/settings` использует `text-scale-11`/`settings-control`/`settings-save-btn` компактные размеры, `app/globals.css` убирает прокрутку `settings-page`, тест `settings page uses compact calendar-like typography without page scroll` проходит.
+
+- Использовать размеры текста как в календаре: `text-scale-11` для заголовков и `text-scale-10` для описаний.
+- Сделать настройки компактнее.
+- Убрать необходимость прокрутки страницы настроек.
+
+### 9. Сделать `steamcommunity.com/dev/apikey` кликабельной ссылкой
+
+**Статус:** выполнено; `/settings` рендерит `https://steamcommunity.com/dev/apikey` как `<a>` с `target="_blank"`, `data-external="true"` и существующим desktop external link handling.
+
+- В подсказке настроек Steam API key сделать домен ссылкой.
+- Открытие должно работать в web и desktop через существующий механизм внешних ссылок.
+
+### 10. Заменить ручной ввод региона на выпадающий список
+
+**Статус:** выполнено; `/settings` использует `<select id="storeCc" name="storeCc">` со значениями `us`, `ua`, `ru`, `kz` и fallback для ранее сохранённых двухбуквенных кодов.
+
+- В настройках региона Steam Store заменить текстовое поле на `select`.
+- Использовать значения/ID `us` для America, `ua` для Ukraine, `ru` для Russia, `kz` для Kazakhstan.
+- Передавать выбранный ID в приложение и сохранить совместимость с существующим `storeCc`.
+
+### 11. Оптимизировать пайплайн сборки
+
+**Статус:** выполнено на уровне workflow и вспомогательных скриптов; `.github/workflows/docker.yml` сначала выполняет `preflight` и `checks`, затем `desktop-base`, затем Linux/Windows builder и export jobs для `.deb` (Debian/Ubuntu), `.rpm` (RHEL/Fedora), Arch `.pkg.tar.zst` (Arch Linux), universal AppImage и Windows installer; реальная публикация GitHub Actions/GHCR через `Run workflow` в этом окружении не проверялась.
+
+- Сначала выполнить базовые проверки и собрать общий базовый слой/образ.
+- Затем собирать desktop-артефакты через отдельные jobs:
+  - `.deb` для Debian/Ubuntu;
+  - `.rpm` для RHEL/Fedora;
+  - `.pkg.tar.zst` для Arch Linux;
+  - universal AppImage;
+  - Windows installer.
+- Не запускать лишние повторные дорогие шаги для каждой платформы там, где можно переиспользовать общую базу.

@@ -41,8 +41,10 @@ export function CalendarGrid({
   const calendarRowsStyle = {
     gridTemplateRows: `auto ${rowWeights
       .map((weight) => {
-        const minVar = weight > 1 ? "var(--calendar-row-card-min)" : "var(--calendar-row-empty-min)";
-        return `minmax(${minVar}, ${weight}fr)`;
+        const isCardRow = weight > 1;
+        const minVar = isCardRow ? "var(--calendar-row-card-min)" : "var(--calendar-row-empty-min)";
+        const maxVar = isCardRow ? "var(--calendar-row-card-max)" : "var(--calendar-row-empty-max)";
+        return `minmax(${minVar}, ${maxVar})`;
       })
       .join(" ")}`,
   } as CSSProperties;

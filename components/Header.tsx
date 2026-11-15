@@ -63,16 +63,6 @@ export function Header({
           unavailableLabel={t("wishlist.unavailable")}
         />
         <ThemeToggleButton theme={theme} label={t("theme.toggle")} />
-        <form action="/auth/lang" method="post" className="flex items-center gap-1">
-          <button
-            type="submit"
-            name="lang"
-            value={lang === "ru" ? "en" : "ru"}
-            className="rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1 text-xs hover:bg-zinc-200 dark:hover:bg-zinc-800"
-          >
-            {t("lang.switch")}: {lang === "ru" ? "EN" : "RU"}
-          </button>
-        </form>
         {signedIn ? (
           <form action="/auth/logout" method="post">
             {avatar ? (

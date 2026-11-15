@@ -3,11 +3,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { CalendarFeed } from "@/components/CalendarFeed";
 import { CalendarFeedSkeleton } from "@/components/CalendarFeedSkeleton";
+import { CalendarSubscriptionMenu } from "@/components/CalendarSubscriptionMenu";
 import { CalendarViewToggle } from "@/components/CalendarViewToggle";
-import {
-  createCalendarFeedLink,
-  revokeCalendarFeedLink,
-} from "@/app/actions/calendar-feed";
 import { getCalendarFeedToken } from "@/lib/auth-store";
 import {
   calendarFeedPath,
@@ -78,69 +75,14 @@ export default async function CalendarPage({
       <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
         <h1 className="text-lg font-semibold">{t("calendar.title")}</h1>
         <div className="flex items-center gap-1 flex-wrap">
-          {feedPath ? (
-            <>
-              <a
-                href={googleUrl ?? feedPath}
-                target="_blank"
-                rel="noreferrer"
-                data-external={googleUrl ? "true" : undefined}
-                className="rounded bg-[#1b2838] px-3 py-1 text-white hover:bg-[#2a475e]"
-              >
-                {googleUrl ? t("calendar.subscribe.google") : t("calendar.subscribe.ics")}
-              </a>
-              {feedUrl && googleUrl ? (
-                <details className="relative">
-                  <summary className="cursor-pointer rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                    {t("calendar.feed.manage")}
-                  </summary>
-                  <div className="absolute right-0 z-10 mt-1 w-[min(30rem,calc(100vw-2rem))] rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-2 shadow">
-                    <p className="mb-2 text-xs opacity-70">{t("calendar.feed.help")}</p>
-                    <input
-                      readOnly
-                      value={feedUrl}
-                      className="w-full rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 text-xs font-mono"
-                    />
-                    <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <a
-                        href={feedPath}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                      >
-                        {t("calendar.feed.ics")}
-                      </a>
-                      <form action={revokeCalendarFeedLink}>
-                        <input type="hidden" name="month" value={monthValue} />
-                        <input type="hidden" name="view" value={view} />
-                        <button type="submit" className="text-xs text-red-600 hover:underline">
-                          {t("calendar.feed.revoke")}
-                        </button>
-                      </form>
-                    </div>
-                  </div>
-                </details>
-              ) : null}
-            </>
-          ) : (
-            <form action={createCalendarFeedLink}>
-              <input type="hidden" name="month" value={monthValue} />
-              <input type="hidden" name="view" value={view} />
-              <button
-                type="submit"
-                className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                {t("calendar.subscribe.ics")}
-              </button>
-            </form>
-          )}
-          <a
-            href="/calendar/ics"
-            download
-            className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            {t("calendar.export.ics")}
-          </a>
+          <CalendarSubscriptionMenu
+            steamId={session.steamId}
+            feedPath={feedPath}
+            feedUrl={feedUrl}
+            googleUrl={googleUrl}
+            monthValue={monthValue}
+            view={view}
+          />
           <CalendarViewToggle lang={lang} view={view} year={year} month1={month1} />
         </div>
       </div>

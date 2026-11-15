@@ -10,6 +10,11 @@ DEB_FILE="${DEB_FILE:-}"
 ARCH_NAME="${ARCH_NAME:-x86_64}"
 PKG_NAME="${PKG_NAME:-steam-calendar}"
 VERIFY_ARCH="${VERIFY_ARCH:-0}"
+PULL_IMAGE="${PULL_IMAGE:-0}"
+
+if [ "$PULL_IMAGE" = "1" ] || ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  docker pull "$IMAGE" >/dev/null
+fi
 
 if [ -z "$DEB_FILE" ]; then
   DEB_FILE="$(find "$OUT_DIR" -maxdepth 1 -type f -name 'steam-calendar_*.deb' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"

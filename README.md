@@ -397,7 +397,10 @@ https://github.com/<owner>/steam-calendar/pkgs/container/steam-calendar
 
 Если включен input `publish_release`, workflow собирает desktop-артефакты через существующие Docker-скрипты:
 
-- Linux: `.deb`, `.rpm` и AppImage из `out/linux`;
+- `.deb` для Debian/Ubuntu из `out/linux`;
+- `.rpm` для RHEL/Fedora из `out/linux`;
+- AppImage как universal Linux-пакет из `out/linux`;
+- `.pkg.tar.zst` для Arch Linux из `out/arch`;
 - Windows: NSIS setup `.exe` из `out/windows`.
 
 После сборки workflow создает GitHub release с тегом `v<version>` и загружает эти файлы как release assets. Если релиз с таким тегом уже существует, assets обновляются с `--clobber`, а title и notes перезаписываются.

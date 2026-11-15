@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { logDebug } from "@/lib/debug";
-import { getT } from "@/lib/i18n";
+import { getLang, getT } from "@/lib/i18n";
 import { requireSteamSession } from "@/lib/session";
 import { formatSteamStoreCc } from "@/lib/store-cc";
 import { saveSettings } from "@/app/actions/settings";
@@ -10,6 +10,13 @@ function isSaved(raw: string | string[] | undefined): boolean {
   const value = Array.isArray(raw) ? raw[0] : raw;
   return value === "1";
 }
+
+const STORE_CC_REGION_OPTIONS = [
+  { value: "us", labelKey: "settings.storeCc.option.us" },
+  { value: "ua", labelKey: "settings.storeCc.option.ua" },
+  { value: "ru", labelKey: "settings.storeCc.option.ru" },
+  { value: "kz", labelKey: "settings.storeCc.option.kz" },
+] satisfies { value: string; labelKey: string }[];
 
 export default async function SettingsPage({
   searchParams,
@@ -22,8 +29,9 @@ export default async function SettingsPage({
     redirect("/auth/login");
   }
 
-  const [t, sp, theme] = await Promise.all([
+  const [t, lang, sp, theme] = await Promise.all([
     getT(session.steamId),
+    getLang(session.steamId),
     searchParams,
     getThemePreference(),
   ]);
@@ -31,88 +39,120 @@ export default async function SettingsPage({
   const saved = isSaved(sp.saved);
   logDebug("settings.page.render", { saved });
 
+  const currentStoreCc = session.storeCc ?? "";
+  const storeCcOptions = [
+    { value: "", label: t("settings.storeCc.option.none") },
+    ...(currentStoreCc && !STORE_CC_REGION_OPTIONS.some((option) => option.value === currentStoreCc)
+      ? [{ value: currentStoreCc, label: formatSteamStoreCc(currentStoreCc) }]
+      : []),
+    ...STORE_CC_REGION_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey),
+    })),
+  ];
+
   return (
-    <section className="settings-page app-shell mt-4 flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">{t("settings.title")}</h1>
+    <section className="settings-page app-shell mt-3">
+      <h1 className="text-scale-11 font-semibold">{t("settings.title")}</h1>
 
-      {saved && (
-        <div className="text-sm rounded border border-green-300 dark:border-green-700 bg-green-100 dark:bg-green-900/30 px-3 py-2">
-          {t("settings.saved.flash")}
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <span className="font-medium">{t("settings.theme.label")}</span>
-          <span className="text-xs rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1">
-            {t(`theme.${theme}`)}
-          </span>
-        </div>
-        <p className="text-sm opacity-70">{t("settings.theme.help")}</p>
-        <form action="/theme" method="post" className="flex flex-col gap-2">
-          <fieldset className="flex flex-wrap items-center gap-3 border border-zinc-300 dark:border-zinc-700 rounded px-3 py-2">
-            <legend className="sr-only">{t("settings.theme.label")}</legend>
-            {(
-              [
-                { value: "light" as const, label: t("theme.light") },
-                { value: "dark" as const, label: t("theme.dark") },
-                { value: "system" as const, label: t("theme.system") },
-              ] satisfies { value: ThemePreference; label: string }[]
-            ).map((option) => (
-              <label key={option.value} className="flex items-center gap-1 text-sm">
-                <input
-                  type="radio"
-                  name="theme"
-                  value={option.value}
-                  defaultChecked={theme === option.value}
-                />
-                {option.label}
-              </label>
-            ))}
-          </fieldset>
-          <button
-            type="submit"
-            className="self-start rounded bg-[#1b2838] px-4 py-2 text-white hover:bg-[#2a475e]"
-          >
-            {t("settings.theme.save")}
-          </button>
-        </form>
-      </div>
-
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="steamApiKey" className="font-medium">
-              {t("settings.apiKey.label")}
-            </label>
-            <span className="text-xs rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1">
-              {session.apiKey ? t("settings.status.saved") : t("settings.status.notSet")}
-            </span>
+      <div className="settings-grid">
+        {saved && (
+          <div className="settings-card settings-flash">
+            {t("settings.saved.flash")}
           </div>
-          <p className="text-sm opacity-70">{t("settings.apiKey.help")}</p>
-          <form action={saveSettings} className="flex flex-col gap-2">
+        )}
+
+        <div className="settings-card">
+          <h2>{t("settings.language.label")}</h2>
+          <span className="settings-status">{t(`settings.language.${lang}`)}</span>
+          <p>{t("settings.language.help")}</p>
+          <form action="/auth/lang" method="post">
+            <fieldset>
+              <legend className="sr-only">{t("settings.language.label")}</legend>
+              <label>
+                <input type="radio" name="lang" value="ru" defaultChecked={lang === "ru"} />
+                {t("settings.language.ru")}
+              </label>
+              <label>
+                <input type="radio" name="lang" value="en" defaultChecked={lang === "en"} />
+                {t("settings.language.en")}
+              </label>
+            </fieldset>
+            <button type="submit" className="settings-save-btn">
+              {t("settings.language.label")}
+            </button>
+          </form>
+        </div>
+
+        <div className="settings-card">
+          <h2>{t("settings.theme.label")}</h2>
+          <span className="settings-status">{t(`theme.${theme}`)}</span>
+          <p>{t("settings.theme.help")}</p>
+          <form action="/theme" method="post">
+            <fieldset>
+              <legend className="sr-only">{t("settings.theme.label")}</legend>
+              {(
+                [
+                  { value: "light" as const, label: t("theme.light") },
+                  { value: "dark" as const, label: t("theme.dark") },
+                  { value: "system" as const, label: t("theme.system") },
+                ] satisfies { value: ThemePreference; label: string }[]
+              ).map((option) => (
+                <label key={option.value}>
+                  <input
+                    type="radio"
+                    name="theme"
+                    value={option.value}
+                    defaultChecked={theme === option.value}
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </fieldset>
+            <button type="submit" className="settings-save-btn">
+              {t("settings.theme.save")}
+            </button>
+          </form>
+        </div>
+
+        <div className="settings-card">
+          <h2>{t("settings.apiKey.label")}</h2>
+          <span className="settings-status">
+            {session.apiKey ? t("settings.status.saved") : t("settings.status.notSet")}
+          </span>
+          <p>
+            {t("settings.apiKey.help.before")}{" "}
+            <a
+              href="https://steamcommunity.com/dev/apikey"
+              target="_blank"
+              rel="noreferrer"
+              data-external="true"
+              className="underline"
+            >
+              steamcommunity.com/dev/apikey
+            </a>
+            {t("settings.apiKey.help.after")}
+          </p>
+          <form action={saveSettings}>
             <input
               id="steamApiKey"
               name="steamApiKey"
               type="password"
               defaultValue=""
               placeholder={t("settings.apiKey.placeholder")}
-              className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2"
+              className="settings-control"
             />
-            <button
-              type="submit"
-              className="self-start rounded bg-[#1b2838] px-4 py-2 text-white hover:bg-[#2a475e]"
-            >
+            <button type="submit" className="settings-save-btn">
               {t("settings.apiKey.save")}
             </button>
           </form>
           {session.apiKey && (
-            <form action={saveSettings} className="flex flex-col gap-2">
+            <form action={saveSettings}>
               <button
                 type="submit"
                 name="remove"
                 value="steam"
-                className="self-start text-sm text-red-600 hover:underline"
+                className="settings-remove-btn"
               >
                 {t("settings.apiKey.remove")}
               </button>
@@ -120,39 +160,32 @@ export default async function SettingsPage({
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="rawgApiKey" className="font-medium">
-              {t("settings.rawg.label")}
-            </label>
-            <span className="text-xs rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1">
-              {session.rawgApiKey ? t("settings.status.saved") : t("settings.status.notSet")}
-            </span>
-          </div>
-          <p className="text-sm opacity-70">{t("settings.rawg.help")}</p>
-          <form action={saveSettings} className="flex flex-col gap-2">
+        <div className="settings-card">
+          <h2>{t("settings.rawg.label")}</h2>
+          <span className="settings-status">
+            {session.rawgApiKey ? t("settings.status.saved") : t("settings.status.notSet")}
+          </span>
+          <p>{t("settings.rawg.help")}</p>
+          <form action={saveSettings}>
             <input
               id="rawgApiKey"
               name="rawgApiKey"
               type="password"
               defaultValue=""
               placeholder={t("settings.apiKey.placeholder")}
-              className="rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2"
+              className="settings-control"
             />
-            <button
-              type="submit"
-              className="self-start rounded bg-[#1b2838] px-4 py-2 text-white hover:bg-[#2a475e]"
-            >
+            <button type="submit" className="settings-save-btn">
               {t("settings.rawg.save")}
             </button>
           </form>
           {session.rawgApiKey && (
-            <form action={saveSettings} className="flex flex-col gap-2">
+            <form action={saveSettings}>
               <button
                 type="submit"
                 name="remove"
                 value="rawg"
-                className="self-start text-sm text-red-600 hover:underline"
+                className="settings-remove-btn"
               >
                 {t("settings.apiKey.remove")}
               </button>
@@ -160,44 +193,38 @@ export default async function SettingsPage({
           )}
         </div>
 
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="storeCc" className="font-medium">
-              {t("settings.storeCc.label")}
-            </label>
-            <span className="text-xs rounded border border-zinc-300 dark:border-zinc-700 px-2 py-1">
-              {session.storeCc
-                ? `${t("settings.status.saved")}: ${formatSteamStoreCc(session.storeCc)}`
-                : t("settings.status.notSet")}
-            </span>
-          </div>
-          <p className="text-sm opacity-70">{t("settings.storeCc.help")}</p>
-          <form action={saveSettings} className="flex flex-col gap-2">
-            <input
+        <div className="settings-card">
+          <h2>{t("settings.storeCc.label")}</h2>
+          <span className="settings-status">
+            {session.storeCc
+              ? `${t("settings.status.saved")}: ${formatSteamStoreCc(session.storeCc)}`
+              : t("settings.status.notSet")}
+          </span>
+          <p>{t("settings.storeCc.help")}</p>
+          <form action={saveSettings}>
+            <select
               id="storeCc"
               name="storeCc"
-              type="text"
-              inputMode="text"
-              pattern="[a-zA-Z]{0,2}"
-              maxLength={2}
-              defaultValue={session.storeCc ?? ""}
-              placeholder={t("settings.storeCc.placeholder")}
-              className="w-28 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-2 uppercase"
-            />
-            <button
-              type="submit"
-              className="self-start rounded bg-[#1b2838] px-4 py-2 text-white hover:bg-[#2a475e]"
+              defaultValue={currentStoreCc}
+              className="settings-control"
             >
+              {storeCcOptions.map((option) => (
+                <option key={option.value || "none"} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button type="submit" className="settings-save-btn">
               {t("settings.storeCc.save")}
             </button>
           </form>
           {session.storeCc && (
-            <form action={saveSettings} className="flex flex-col gap-2">
+            <form action={saveSettings}>
               <button
                 type="submit"
                 name="remove"
                 value="store"
-                className="self-start text-sm text-red-600 hover:underline"
+                className="settings-remove-btn"
               >
                 {t("settings.storeCc.remove")}
               </button>

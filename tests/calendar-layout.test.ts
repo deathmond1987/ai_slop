@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   computeCalendarCellLayouts,
   computeCalendarColumnWeights,
@@ -127,6 +128,17 @@ test("multiple cards on one day do not make the row taller than other card rows"
   const weights = computeCalendarRowWeights(grid, byDate);
 
   assert.equal(weights[0], GRID_WEEK_ROW_WEIGHT_CAP);
+});
+
+test("calendar row tracks are capped to fixed row heights", () => {
+  const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(gridSource, /const maxVar = isCardRow \? "var\(--calendar-row-card-max\)" : "var\(--calendar-row-empty-max\)";/);
+  assert.match(gridSource, /return `minmax\(\$\{minVar\}, \$\{maxVar\}\)`;/);
+  assert.doesNotMatch(gridSource, /gridTemplateRows[\s\S]*\$\{weight\}fr/);
+  assert.match(globalsSource, /--calendar-row-empty-max: var\(--calendar-row-empty-min\);/);
+  assert.match(globalsSource, /--calendar-row-card-max: var\(--calendar-row-card-min\);/);
 });
 
 test("out-of-month cards still affect calendar row weights", () => {

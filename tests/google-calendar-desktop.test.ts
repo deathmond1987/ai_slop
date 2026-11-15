@@ -10,6 +10,10 @@ const pageSource = readFileSync(
   new URL("../app/calendar/page.tsx", import.meta.url),
   "utf8",
 );
+const subscriptionMenuSource = readFileSync(
+  new URL("../components/CalendarSubscriptionMenu.tsx", import.meta.url),
+  "utf8",
+);
 const layoutSource = readFileSync(
   new URL("../app/layout.tsx", import.meta.url),
   "utf8",
@@ -21,6 +25,12 @@ const desktopLinksSource = readFileSync(
 const capabilities = JSON.parse(
   readFileSync(
     new URL("../desktop_version/linux/src-tauri/capabilities/default.json", import.meta.url),
+    "utf8",
+  ),
+);
+const sidecarCapabilities = JSON.parse(
+  readFileSync(
+    new URL("../desktop_version/linux/src-tauri/capabilities/sidecar.json", import.meta.url),
     "utf8",
   ),
 );
@@ -40,7 +50,6 @@ test("calendar page renders local Google-open panel with app back link", () => {
   assert.ok(pageSource.includes('t("calendar.google.back")'));
   assert.ok(pageSource.includes('t("calendar.google.open")'));
   assert.ok(pageSource.includes('data-external="true"'));
-  assert.ok(pageSource.includes('data-external={googleUrl ? "true" : undefined}'));
 });
 
 test("layout mounts desktop external link interceptor", () => {
@@ -60,10 +69,33 @@ test("desktop Tauri capabilities allow shell open for http links", () => {
   assert.ok(capabilities.permissions.includes("shell:default"));
 });
 
+test("sidecar remote Tauri capability allows local WebView external links", () => {
+  assert.ok(sidecarCapabilities.windows.includes("main"));
+  assert.ok(sidecarCapabilities.remote.urls.includes("http://127.0.0.1:*"));
+  assert.ok(sidecarCapabilities.remote.urls.includes("http://localhost:*"));
+  assert.ok(sidecarCapabilities.permissions.includes("shell:allow-open"));
+});
+
+test("calendar page uses a unified subscription menu", () => {
+  assert.ok(pageSource.includes("<CalendarSubscriptionMenu"));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.subscribe.menu")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.subscribe.google")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.subscribe.ics")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.export.ics")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.subscribe.create")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.feed.noToken")'));
+  assert.ok(subscriptionMenuSource.includes('action={createCalendarFeedLink}'));
+  assert.ok(subscriptionMenuSource.includes('action={revokeCalendarFeedLink}'));
+  assert.ok(subscriptionMenuSource.includes('data-external="true"'));
+});
+
 test("google calendar desktop translation keys exist in both dictionaries", () => {
   for (const dict of [en, ru]) {
     assert.ok(dict["calendar.google.help"]);
     assert.ok(dict["calendar.google.open"]);
     assert.ok(dict["calendar.google.back"]);
+    assert.ok(dict["calendar.subscribe.menu"]);
+    assert.ok(dict["calendar.subscribe.create"]);
+    assert.ok(dict["calendar.feed.noToken"]);
   }
 });

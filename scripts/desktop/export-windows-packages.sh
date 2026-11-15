@@ -6,11 +6,22 @@ cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-windows-build:latest}"
 OUT_DIR="${OUT_DIR:-out/windows}"
+PULL_IMAGE="${PULL_IMAGE:-0}"
 node scripts/version.mjs sync
 VERSION="${VERSION:-$(node scripts/version.mjs get)}"
 ARCH="${ARCH:-x64}"
 TARGET_TRIPLE="${TARGET_TRIPLE:-x86_64-pc-windows-msvc}"
 BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop_version/linux/src-tauri/target/${TARGET_TRIPLE}/release/bundle}"
+
+if [ "$PULL_IMAGE" = "1" ]; then
+  docker pull "$IMAGE" >/dev/null
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Missing Windows builder image: $IMAGE" >&2
+  echo "Run scripts/desktop/build-windows-docker.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
+  exit 1
+fi
 
 mkdir -p "$OUT_DIR"
 rm -rf "${OUT_DIR:?}/steam-calendar_"*

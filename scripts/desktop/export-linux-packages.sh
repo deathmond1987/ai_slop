@@ -6,15 +6,46 @@ cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-linux-build:latest}"
 OUT_DIR="${OUT_DIR:-out/linux}"
+EXPORT_KIND="${EXPORT_KIND:-all}"
+PULL_IMAGE="${PULL_IMAGE:-0}"
 node scripts/version.mjs sync
 VERSION="${VERSION:-$(node scripts/version.mjs get)}"
 ARCH="${ARCH:-amd64}"
 BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop_version/linux/src-tauri/target/release/bundle}"
 
+if [ "$PULL_IMAGE" = "1" ]; then
+  docker pull "$IMAGE" >/dev/null
+fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  echo "Missing Linux builder image: $IMAGE" >&2
+  echo "Run scripts/desktop/build-linux-docker.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
+  exit 1
+fi
+
 mkdir -p "$OUT_DIR"
-rm -rf "${OUT_DIR:?}/steam-calendar_"*
-rm -f "$OUT_DIR"/*.rpm
-rm -f "$OUT_DIR"/*.AppImage
+
+case "$EXPORT_KIND" in
+  all)
+    rm -rf "${OUT_DIR:?}/steam-calendar_"*
+    rm -f "$OUT_DIR"/*.rpm
+    rm -f "$OUT_DIR"/*.AppImage
+    ;;
+  deb)
+    rm -f "$OUT_DIR"/*.deb
+    ;;
+  rpm)
+    rm -f "$OUT_DIR"/*.rpm
+    ;;
+  appimage)
+    rm -f "$OUT_DIR"/*.AppImage
+    ;;
+  *)
+    echo "Unsupported EXPORT_KIND: $EXPORT_KIND" >&2
+    echo "Expected one of: all, deb, rpm, appimage" >&2
+    exit 1
+    ;;
+esac
 
 container_name="steam-calendar-export-linux-$$"
 container_id="$(docker create --name "$container_name" "$IMAGE" sleep 3600)"
@@ -50,8 +81,32 @@ copy_latest_bundle() {
   echo "Exported $artifact_path -> $OUT_DIR/$output_name"
 }
 
-copy_latest_bundle "$BUNDLE_BASE/deb" "*.deb" "steam-calendar_${VERSION}_${ARCH}.deb"
-copy_latest_bundle "$BUNDLE_BASE/rpm" "*.rpm" "steam-calendar-${VERSION}-1.x86_64.rpm"
-copy_latest_bundle "$BUNDLE_BASE/appimage" "*.AppImage" "steam-calendar_${VERSION}_${ARCH}.AppImage"
+copy_bundle_if_kind() {
+  local kind="$1"
+  local bundle_dir="$2"
+  local pattern="$3"
+  local output_name="$4"
 
-ls -lh "$OUT_DIR"/*.deb "$OUT_DIR"/*.rpm "$OUT_DIR"/*.AppImage
+  if [ "$EXPORT_KIND" = "all" ] || [ "$EXPORT_KIND" = "$kind" ]; then
+    copy_latest_bundle "$bundle_dir" "$pattern" "$output_name"
+  fi
+}
+
+copy_bundle_if_kind deb "$BUNDLE_BASE/deb" "*.deb" "steam-calendar_${VERSION}_${ARCH}.deb"
+copy_bundle_if_kind rpm "$BUNDLE_BASE/rpm" "*.rpm" "steam-calendar-${VERSION}-1.x86_64.rpm"
+copy_bundle_if_kind appimage "$BUNDLE_BASE/appimage" "*.AppImage" "steam-calendar_${VERSION}_${ARCH}.AppImage"
+
+case "$EXPORT_KIND" in
+  all)
+    ls -lh "$OUT_DIR"/*.deb "$OUT_DIR"/*.rpm "$OUT_DIR"/*.AppImage
+    ;;
+  deb)
+    ls -lh "$OUT_DIR"/*.deb
+    ;;
+  rpm)
+    ls -lh "$OUT_DIR"/*.rpm
+    ;;
+  appimage)
+    ls -lh "$OUT_DIR"/*.AppImage
+    ;;
+esac
