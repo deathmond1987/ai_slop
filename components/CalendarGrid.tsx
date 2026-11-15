@@ -38,13 +38,13 @@ export function CalendarGrid({
   const gridStyle = {
     gridTemplateColumns: columnWeights.map((weight) => `minmax(0, ${weight}fr)`).join(" "),
   } as CSSProperties;
+  // Недели с играми получают авто-высоту под карточку, пустые недели делят остаток высоты.
   const calendarRowsStyle = {
-    gridTemplateRows: `auto ${rowWeights
+    gridTemplateRows: `minmax(var(--calendar-row-header-min), var(--calendar-row-header-max)) ${rowWeights
       .map((weight) => {
         const isCardRow = weight > 1;
-        const minVar = isCardRow ? "var(--calendar-row-card-min)" : "var(--calendar-row-empty-min)";
-        const maxVar = isCardRow ? "var(--calendar-row-card-max)" : "var(--calendar-row-empty-max)";
-        return `minmax(${minVar}, ${maxVar})`;
+        if (isCardRow) return "minmax(0, auto)";
+        return "1fr";
       })
       .join(" ")}`,
   } as CSSProperties;

@@ -366,6 +366,129 @@ function textSnippet(text, max = 500) {
   return String(text).replace(/\s+/g, " ").trim().slice(0, max);
 }
 
+// Проверяет раскладку календаря: строки с играми вмещают карточку, пустые недели заполняют остаток высоты.
+async function assertCardRowsFitCardsAndEmptyRowsFillRemainingHeight(page) {
+  await page.waitForFunction(() => document.documentElement.classList.contains("calendar-fit-viewport"), { timeout: 15000 });
+
+  const layout = await page.evaluate(() => {
+    const rows = document.querySelector(".calendar-grid-rows");
+    if (!rows) throw new Error("missing .calendar-grid-rows");
+
+    const header = rows.querySelector(".calendar-grid-header");
+    const weekRows = Array.from(rows.querySelectorAll(".calendar-week-row"));
+    if (!header || weekRows.length === 0) throw new Error("missing calendar grid header or week rows");
+
+    const rect = (el) => {
+      if (!el) return undefined;
+      const r = el.getBoundingClientRect();
+      return { top: r.top, bottom: r.bottom, height: r.height };
+    };
+
+    const cardRect = (card) => {
+      const r = card.getBoundingClientRect();
+      return { width: r.width, height: r.height, ratio: r.height / r.width };
+    };
+
+    const cs = getComputedStyle(rows);
+    const rowsRect = rows.getBoundingClientRect();
+    const headerRect = header.getBoundingClientRect();
+    const rowRects = weekRows.map((row) => {
+      const r = row.getBoundingClientRect();
+      const cards = Array.from(row.querySelectorAll(".calendar-game-card")).map(cardRect);
+      return {
+        isCardRow: row.classList.contains("calendar-week-row-cards"),
+        top: r.top,
+        bottom: r.bottom,
+        height: r.height,
+        cards,
+        maxCardHeight: cards.length ? Math.max(...cards.map((card) => card.height)) : null,
+      };
+    });
+    const lastRect = rowRects.at(-1);
+    const cards = Array.from(rows.querySelectorAll(".calendar-game-card")).map(cardRect);
+    const main = document.querySelector("main");
+    const mainSection = main?.querySelector("section");
+    const feed = document.querySelector(".calendar-feed-with-tbd");
+    const gridShell = rows.closest(".calendar-grid-shell");
+    const gridScroll = rows.closest(".calendar-grid-scroll");
+
+    return {
+      fit: document.documentElement.classList.contains("calendar-fit-viewport"),
+      viewportHeight: window.innerHeight,
+      main: rect(main),
+      mainSection: rect(mainSection),
+      feed: rect(feed),
+      gridShell: rect(gridShell),
+      gridScroll: rect(gridScroll),
+      gridRows: rect(rows),
+      alignContent: cs.alignContent,
+      gridTemplateRows: cs.gridTemplateRows,
+      gridHeight: rowsRect.height,
+      headerHeight: headerRect.height,
+      rows: rowRects,
+      cards,
+      gapAfterLastRow: rowsRect.bottom - (lastRect?.bottom ?? rowsRect.bottom),
+      gapAfterRowsToShell: gridShell ? gridShell.getBoundingClientRect().bottom - rowsRect.bottom : undefined,
+      gapAfterRowsToMain: main ? main.getBoundingClientRect().bottom - rowsRect.bottom : undefined,
+    };
+  });
+
+  console.log(`Calendar layout check: ${JSON.stringify(layout)}`);
+
+  if (!layout.fit) {
+    throw new Error("Expected html.calendar-fit-viewport to be set.");
+  }
+  if (layout.alignContent !== "start") {
+    throw new Error(`Expected .calendar-grid-rows align-content to be start, got ${layout.alignContent}.`);
+  }
+
+  const gridScrollHeight = layout.gridScroll?.height ?? 0;
+  const cardRows = layout.rows.filter((row) => row.isCardRow);
+  const emptyRows = layout.rows.filter((row) => !row.isCardRow);
+
+  for (const card of layout.cards) {
+    if (Math.abs(card.ratio - 1 / 1.2) > 0.04) {
+      throw new Error(
+        `Expected calendar game cards to have height/width close to 1 / 1.2, got ${card.height}px / ${card.width}px = ${card.ratio}.`
+      );
+    }
+  }
+
+  for (const row of cardRows) {
+    if (row.maxCardHeight !== null && row.height < row.maxCardHeight - 2) {
+      throw new Error(`Expected a calendar card row to fit its card, got row ${row.height}px for card ${row.maxCardHeight}px.`);
+    }
+    if (row.maxCardHeight !== null && row.height > row.maxCardHeight + 4) {
+      throw new Error(`Expected a calendar card row to stay close to its card height, got row ${row.height}px for card ${row.maxCardHeight}px.`);
+    }
+  }
+
+  if (emptyRows.length > 1) {
+    const emptyHeights = emptyRows.map((row) => row.height);
+    const minEmpty = Math.min(...emptyHeights);
+    const maxEmpty = Math.max(...emptyHeights);
+    if (maxEmpty - minEmpty > 3) {
+      throw new Error(`Expected empty calendar rows to share remaining height evenly, got ${JSON.stringify(emptyHeights)}.`);
+    }
+  }
+
+  if (gridScrollHeight < layout.viewportHeight * 0.55) {
+    throw new Error(`Expected calendar grid scroll area to fill most of the viewport height, got ${gridScrollHeight}px.`);
+  }
+
+  if (emptyRows.length > 0) {
+    if (Math.abs(layout.gapAfterLastRow) > 2) {
+      throw new Error(`Expected empty calendar rows to fill the grid, got ${layout.gapAfterLastRow}px after the last row.`);
+    }
+    if (layout.gapAfterRowsToShell !== undefined && layout.gapAfterRowsToShell > 2) {
+      throw new Error(`Expected calendar grid rows to fill the grid shell, got ${layout.gapAfterRowsToShell}px gap after the rows.`);
+    }
+    if (Math.abs(layout.gridHeight - gridScrollHeight) > 2) {
+      throw new Error(`Expected calendar grid rows to fill the scroll area, got ${layout.gridHeight}px of ${gridScrollHeight}px.`);
+    }
+  }
+}
+
 async function assertRedirectToCalendar(response, label, nextOrigin, getLogText) {
   if (!(response.status >= 300 && response.status < 400)) {
     const body = await response.text().catch(() => "");
@@ -402,7 +525,11 @@ async function assertLoginRedirect(nextOrigin) {
 }
 
 async function runBrowserFlow({ browser, nextOrigin, fakeVerifier, callbackUrl, sessionToken, getLogText }) {
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const viewport = {
+    width: Number(process.env.AUTH_RENDER_VIEWPORT_WIDTH ?? 1440),
+    height: Number(process.env.AUTH_RENDER_VIEWPORT_HEIGHT ?? 900),
+  };
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport });
   try {
     await context.route("**/*", async (route) => {
       try {
@@ -449,6 +576,10 @@ async function runBrowserFlow({ browser, nextOrigin, fakeVerifier, callbackUrl, 
     }
 
     await page.locator("a.calendar-game-card", { hasText: gameName }).waitFor({ state: "attached", timeout: 15000 });
+
+    if (process.env.AUTH_RENDER_LAYOUT_CHECK === "1") {
+      await assertCardRowsFitCardsAndEmptyRowsFillRemainingHeight(page);
+    }
 
     await page.goto(`${nextOrigin}/`, { waitUntil: "load", timeout: 60000 });
     const rootUrl = new URL(page.url());
@@ -582,9 +713,20 @@ async function main() {
   nextEnv.NO_COLOR = "1";
 
   let nextOutput = "";
+  const nextDevArgs = String(process.env.AUTH_RENDER_NEXT_DEV_ARGS ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
   const child = spawn(
     process.execPath,
-    [path.join(projectRoot, "node_modules", "next", "dist", "bin", "next"), "dev", "--hostname", "127.0.0.1", "--port", String(nextPort)],
+    [
+      path.join(projectRoot, "node_modules", "next", "dist", "bin", "next"),
+      "dev",
+      ...nextDevArgs,
+      "--hostname",
+      "127.0.0.1",
+      "--port",
+      String(nextPort),
+    ],
     {
       cwd: projectRoot,
       env: nextEnv,

@@ -130,15 +130,56 @@ test("multiple cards on one day do not make the row taller than other card rows"
   assert.equal(weights[0], GRID_WEEK_ROW_WEIGHT_CAP);
 });
 
-test("calendar row tracks are capped to fixed row heights", () => {
+// Проверка новой раскладки строк: недели с играми имеют auto-высоту, пустые недели получают 1fr.
+test("calendar week-row tracks keep card rows fixed and empty rows fill leftover height", () => {
   const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
   const globalsSource = readFileSync("app/globals.css", "utf8");
 
-  assert.match(gridSource, /const maxVar = isCardRow \? "var\(--calendar-row-card-max\)" : "var\(--calendar-row-empty-max\)";/);
-  assert.match(gridSource, /return `minmax\(\$\{minVar\}, \$\{maxVar\}\)`;/);
-  assert.doesNotMatch(gridSource, /gridTemplateRows[\s\S]*\$\{weight\}fr/);
-  assert.match(globalsSource, /--calendar-row-empty-max: var\(--calendar-row-empty-min\);/);
-  assert.match(globalsSource, /--calendar-row-card-max: var\(--calendar-row-card-min\);/);
+  assert.match(gridSource, /if \(isCardRow\) return "minmax\(0, auto\)";/);
+  assert.match(gridSource, /return "1fr";/);
+  assert.doesNotMatch(gridSource, /const fill = "1fr";/);
+  assert.doesNotMatch(gridSource, /return `minmax\(\$\{minVar\}, \$\{fill\}\)`;/);
+  assert.doesNotMatch(gridSource, /calc\(\$\{weight\} \* var\(--calendar-row-track-fill\)\)/);
+  assert.doesNotMatch(gridSource, /var\(--calendar-row-card-max\)/);
+  assert.doesNotMatch(gridSource, /var\(--calendar-row-empty-max\)/);
+  assert.doesNotMatch(globalsSource, /--calendar-row-track-fill:/);
+  assert.doesNotMatch(globalsSource, /--calendar-row-card-max:/);
+  assert.doesNotMatch(globalsSource, /--calendar-row-empty-max:/);
+});
+
+// Проверка фиксированной высоты карточек: ширина делится на 1.2.
+test("calendar game cards use a fixed height 1.2 times shorter than width", () => {
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(globalsSource, /--calendar-game-card-ratio: 1\.2;/);
+  assert.match(
+    globalsSource,
+    /\.calendar-game-card\s*{[\s\S]*aspect-ratio: var\(--calendar-game-card-ratio\) \/ 1;[\s\S]*height: auto;/
+  );
+});
+
+test("calendar week rows and weekday headers are real CSS grids", () => {
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(globalsSource, /\.calendar-week-row,\s*\.calendar-grid-header\s*{[\s\S]*display: grid;[\s\S]*gap: 1px;/);
+});
+
+test("calendar day content top-aligns fixed-height game cards", () => {
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(globalsSource, /\.calendar-day-content\s*{[\s\S]*align-items: start;[\s\S]*align-content: start;/);
+});
+
+test("weekday header row is a fixed track so it cannot absorb leftover height", () => {
+  const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.doesNotMatch(gridSource, /gridTemplateRows:\s*`auto\b/);
+  assert.match(
+    gridSource,
+    /gridTemplateRows:\s*`minmax\(var\(--calendar-row-header-min\), var\(--calendar-row-header-max\)\)/
+  );
+  assert.match(globalsSource, /--calendar-row-header-max: var\(--calendar-row-header-min\);/);
 });
 
 test("out-of-month cards still affect calendar row weights", () => {

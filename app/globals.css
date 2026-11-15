@@ -30,9 +30,11 @@
   --text-scale-8: calc(8px * var(--ui-scale));
   --calendar-feed-gap: 0.5rem;
   --calendar-row-empty-min: 2rem;
-  --calendar-row-empty-max: var(--calendar-row-empty-min);
-  --calendar-row-card-min: 4rem;
-  --calendar-row-card-max: var(--calendar-row-card-min);
+  --calendar-row-card-min: calc(4rem * 1.5);
+  /* Фиксированное соотношение карточки: высота меньше ширины в 1.2 раза. */
+  --calendar-game-card-ratio: 1.2;
+  --calendar-row-header-min: 2rem;
+  --calendar-row-header-max: var(--calendar-row-header-min);
   --calendar-year-block-title-min: calc(var(--text-scale-11) * 1.25 + 0.25rem);
 }
 
@@ -363,40 +365,45 @@ body:has(.settings-page) .settings-remove-btn:hover {
   gap: var(--calendar-feed-gap);
 }
 
+.calendar-week-row,
+.calendar-grid-header {
+  display: grid;
+  gap: 1px;
+}
+
 .calendar-day-cell {
   position: relative;
   display: grid;
   min-height: var(--calendar-row-card-min);
-  max-height: var(--calendar-row-card-max);
-  grid-template-rows: minmax(0, 1fr);
+  max-height: 100%;
+  grid-template-rows: auto;
   overflow: hidden;
 }
 
 .calendar-week-row-empty .calendar-day-cell {
   min-height: var(--calendar-row-empty-min);
-  max-height: var(--calendar-row-empty-max);
+  max-height: 100%;
 }
 
+/* Карточки прижимаются к началу ячейки, чтобы лишняя высота строки не растягивала их. */
 .calendar-day-content {
   display: grid;
-  height: 100%;
   min-width: 0;
   min-height: 0;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   gap: 1px;
+  align-items: start;
+  align-content: start;
 }
 
-.calendar-day-content-multi {
-  align-items: stretch;
-  align-content: stretch;
-}
-
+/* Игровая карточка имеет фиксированную высоту: ширина делится на 1.2. */
 .calendar-game-card {
   display: grid;
-  height: 100%;
+  height: auto;
   min-width: 0;
   min-height: 0;
+  aspect-ratio: var(--calendar-game-card-ratio) / 1;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
@@ -701,7 +708,7 @@ body:has(.settings-page) .settings-remove-btn:hover {
   html.calendar-fit-viewport main .calendar-grid-rows {
     height: 100%;
     min-height: 0;
-    align-content: stretch;
+    align-content: start;
   }
 
   html.calendar-fit-viewport main .calendar-week-row {
