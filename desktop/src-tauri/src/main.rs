@@ -1,7 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod export;
 mod sidecar;
 
+use export::save_calendar_export;
 use tauri::Manager;
 
 use sidecar::{ensure_sidecar, kill_sidecar, restart_sidecar, sidecar_status, SidecarState};
@@ -15,7 +17,11 @@ fn main() {
             ensure_sidecar(&handle);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![sidecar_status, restart_sidecar])
+        .invoke_handler(tauri::generate_handler![
+            sidecar_status,
+            restart_sidecar,
+            save_calendar_export
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Steam Calendar desktop application")
         .run(|app_handle, event| {

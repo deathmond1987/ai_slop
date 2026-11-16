@@ -6,4 +6,4 @@ COPY . .
 
 RUN npm ci
 RUN npm run build
-RUN node desktop_version/linux/scripts/gen-icons.mjs
+RUN node desktop/scripts/gen-icons.mjs

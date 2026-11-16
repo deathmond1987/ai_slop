@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptsDir = path.dirname(scriptPath);
 const desktopDir = path.resolve(scriptsDir, "..");
-const repoRoot = path.resolve(desktopDir, "..", "..");
+const repoRoot = path.resolve(desktopDir, "..");
 
 const sidecarBaseName = process.env.STEAM_CALENDAR_SIDECAR_NAME || "steam-calendar-node";
 const buildDir = path.join(desktopDir, ".build");

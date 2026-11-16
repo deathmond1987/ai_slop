@@ -13,7 +13,7 @@
 
 ## 2. Перевести сборки desktop app в bash-скрипты при помощи Docker
 
-**Статус:** выполнено для Linux и Windows; добавлены простые wrappers `build/linux.sh`, `build/windows.sh` и `build/all.sh`.
+**Статус:** выполнено для Linux и Windows; сборка desktop-приложения выполняется через Docker-скрипты, а единый пользовательский вход — корневой `build-desktop-binary.sh`.
 
 - Вынести логику сборки desktop-приложения в отдельные bash-скрипты.
 - Использовать Docker как основной и стабильный путь сборки.
@@ -50,12 +50,12 @@
 
 ## 6. Простые build-скрипты для всех уже поддерживаемых ОС
 
-**Статус:** выполнено; добавлены `build/all.sh`, `build/linux.sh`, `build/windows.sh` и npm-алиасы `build:all`, `build:linux`, `build:windows`; полный прогон `bash build/all.sh` успешно собрал Linux и Windows артефакты.
+**Статус:** выполнено; простые wrappers заменены корневым `build-desktop-binary.sh` и npm-алиасами `build:all`, `build:linux`, `build:windows`.
 
-- Собрать все поддерживаемые desktop-платформы одной командой `bash build/all.sh`.
-- Сохранить отдельные команды для Linux и Windows.
+- Собрать все поддерживаемые desktop-платформы одной командой `bash build-desktop-binary.sh`.
+- Сохранить отдельные команды для Linux и Windows: `bash build-desktop-binary.sh linux` и `bash build-desktop-binary.sh windows`.
 - Артефакты по-прежнему писать в `out/linux` и `out/windows`.
-- Обновить документацию и план под простые команды сборки.
+- Обновить документацию и план под единый корневой скрипт сборки.
 
 ## 7. Исправить проблемы с настройками API key и region
 
@@ -93,28 +93,31 @@
 
 **Статус:** реализовано; `createCalendarFeedLink` больше не делает прямой `redirect(googleCalendarImportUrl(feedUrl))`, а возвращает на `/calendar?...&openGoogle=1`; `/calendar` показывает локальную панель с "Назад в приложение" и явной ссылкой `data-external="true"`; `DesktopExternalLinks` в Next layout перехватывает только помеченные внешние `http(s)`-ссылки в Tauri WebView и открывает их через `window.__TAURI__.shell.open`; `shell:default` добавлен в Tauri capabilities; README и CODE_OVERVIEW обновлены. Добавлен `tests/google-calendar-desktop.test.ts`; `npm test` — 147 tests pass, `npm run lint`, `npx tsc --noEmit` и `npm run build` прошли успешно.
 
-- При клике на подписку Google Calendar приложение переходит на `https://calendar.google.com/calendar/r?cid=...` из WebView (`desktop_version/linux/web/index.html` -> local Next.js sidecar -> `app/calendar/page.tsx` / `app/actions/calendar-feed.ts`), и Tauri-окно показывает внешнюю страницу без browser UI и кнопки "назад".
+- При клике на подписку Google Calendar приложение переходит на `https://calendar.google.com/calendar/r?cid=...` из WebView (`desktop/web/index.html` -> local Next.js sidecar -> `app/calendar/page.tsx` / `app/actions/calendar-feed.ts`), и Tauri-окно показывает внешнюю страницу без browser UI и кнопки "назад".
 - Примеры решения:
   - открыть внешнюю ссылку в системном браузере через Tauri `shell.open`/`tauri-plugin-opener` и выдать соответствующие capabilities/permissions;
   - перехватить `target="_blank"` и внешние `http(s)`-ссылки в desktop-обёртке, оставляя внутри WebView только переходы на `127.0.0.1` локального sidecar;
   - вместо прямого `redirect(googleCalendarImportUrl(feedUrl))` в server action показывать локальную страницу с кнопкой "Назад в приложение" и явной кнопкой "Открыть Google Calendar в браузере";
   - добавить в desktop-обёртку минимальную панель навигации/кнопку возврата на локальный sidecar URL.
 
-## 11. Публикация desktop-пакетов и Docker-образа по кнопке, без автоматической сборки
+## 11. Публикация desktop-пакетов и container image по тегу на main без linked packages в репозитории
 
-**Статус:** реализовано на уровне workflow и документации; GitHub Actions можно проверить только ручным запуском `Run workflow`.
+**Статус:** реализовано на уровне workflow и документации; фактический GitHub Actions run нужно проверить после коммита и создания тега на `main`.
 
-- Workflow `.github/workflows/docker.yml` переименован в `Publish release by button`.
-- Убраны автоматические триггеры `push`, `push tags v*` и `pull_request`.
-- Запуск разрешен только через `workflow_dispatch`, то есть через кнопку `Run workflow` в GitHub Actions.
+- Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag`.
+- Триггер сборки: push tag `v*`.
+- `preflight` job проверяет, что коммит тега достижим из ветки `main`; тег вне `main` делает workflow failed.
+- Версия релиза берется из имени тега: `v1.2.3` дает `1.2.3`, `v1.2.3-beta.1` дает pre-release `1.2.3-beta.1`.
 - Workflow сначала выполняет `preflight` и `checks` (`npm ci`, `npm run check`).
-- Docker image собирается и публикуется в GitHub Container Registry только при input `publish_docker`.
-- Docker image публикуется как `ghcr.io/<owner>/steam-calendar` с тегами version, major.minor, major, SHA и опциональным `latest`.
-- При `prerelease=true` или при версии вида `1.2.3-beta.1` GitHub release помечается pre-release и Docker tag `latest` не публикуется.
-- Desktop-пакеты собираются через существующие Docker-скрипты:
+- Production container image собирается и публикуется в GHCR `ghcr.io/<repository-owner>/steam-calendar` через `docker` job после `checks`.
+- GHCR login использует secret `GHCR_TOKEN` (classic personal access token с `write:packages`) и optional `GHCR_USERNAME`; `GITHUB_TOKEN` для публикации контейнера не используется.
+- `permissions` содержит только `contents: write`; workflow не получает `packages: write`, поэтому GHCR-пакет не связывается автоматически с репозиторием и не появляется в разделе Packages главной страницы репозитория.
+- В Docker labels `org.opencontainers.image.source` оставлен пустым, чтобы не подключать GHCR-пакет к репозиторию.
+- Если пакет уже был создан ранее через `GITHUB_TOKEN` и связан с репозиторием, его нужно один раз unlink в Package settings; workflow это не делает автоматически.
+- Desktop-пакеты собираются matrix-задачами через корневой `build-desktop-binary.sh`, который вызывает существующие Docker-скрипты в `scripts/desktop/`:
   - Linux `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst` в одной Linux task;
   - Windows NSIS setup `.exe`.
-- При `publish_release=true` workflow собирает desktop-пакеты и публикует их как GitHub release assets с тегом `v<version>`.
+- Workflow загружает desktop-пакеты как GitHub release assets на страницу releases.
 
 ## Новая фаза: 11 изменений
 
@@ -202,10 +205,22 @@
 
 ### 11. Оптимизировать пайплайн сборки
 
-**Статус:** пайплайн упрощен: `.github/workflows/docker.yml` выполняет `preflight`, `checks`, отдельную job `docker` для production Docker-контейнера, desktop matrix с задачами `linux` и `windows`, затем `release`. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Отдельные builder/export jobs и публикация desktop builder-образов в GHCR убраны; проверка реального GitHub Actions runs продолжается после повторного запуска.
+**Статус:** пайплайн изменен на триггер по тегу на `main`: `.github/workflows/release.yml` выполняет `preflight`, `checks`, `docker`, desktop matrix с задачами `linux` и `windows`, затем `release`. `docker` job публикует production container image в GHCR через `GHCR_TOKEN` без automatic repository package linking. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Проверка реального GitHub Actions runs продолжается после создания тега на `main`.
 
-- Production Docker-контейнер собирается в отдельной job `docker` при `publish_docker=true`.
-- Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`.
+- Release workflow запускается push tag `v*` и проверяет, что тег достижим из ветки `main`.
+- Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`; каждая задача вызывает `bash build-desktop-binary.sh <platform>`.
 - Linux task в одном job собирает `desktop-linux-packages`: `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst`.
 - Windows task в одном job собирает `desktop-windows-packages`.
 - Не запускать лишние отдельные builder/export jobs и не публиковать desktop builder images в GHCR.
+- GHCR production image публикуется как personal/org package и не должен быть linked to repository; GitHub release содержит desktop assets и GHCR image tags.
+
+## 12. Упростить desktop-сборку до одного корневого скрипта
+
+**Статус:** выполнено локально; создан корневой `build-desktop-binary.sh`, остальные desktop-компоненты и Dockerfiles оставлены в `desktop/`, CI вызывает корневой скрипт.
+
+- Добавить один понятный вход для desktop-сборок в корне репозитория.
+- Убрать лишние wrapper-скрипты `build/all.sh`, `build/linux.sh` и `build/windows.sh`.
+- Сохранить все внутренние `scripts/desktop/*` скрипты и Dockerfiles в существующих рабочих директориях.
+- Перевести пути desktop-сборок с `desktop_version/linux/...` на `desktop/...`.
+- Сохранить artifacts в `out/linux` и `out/windows`.
+- Обновить npm scripts, `.github/workflows/release.yml`, README, desktop README и docs.

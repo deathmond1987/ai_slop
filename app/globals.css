@@ -31,8 +31,7 @@
   --calendar-feed-gap: 0.5rem;
   --calendar-row-empty-min: 2rem;
   --calendar-row-card-min: calc(4rem * 1.5);
-  /* Фиксированное соотношение карточки: высота меньше ширины в 1.2 раза. */
-  --calendar-game-card-ratio: 1.2;
+  --calendar-game-card-height: var(--calendar-row-card-min);
   --calendar-row-header-min: 2rem;
   --calendar-row-header-max: var(--calendar-row-header-min);
   --calendar-year-block-title-min: calc(var(--text-scale-11) * 1.25 + 0.25rem);
@@ -377,7 +376,7 @@ body:has(.settings-page) .settings-remove-btn:hover {
   min-height: var(--calendar-row-card-min);
   max-height: 100%;
   grid-template-rows: auto;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .calendar-week-row-empty .calendar-day-cell {
@@ -397,13 +396,12 @@ body:has(.settings-page) .settings-remove-btn:hover {
   align-content: start;
 }
 
-/* Игровая карточка имеет фиксированную высоту: ширина делится на 1.2. */
+/* Карточка сохраняет персистентную вертикальную высоту; строка недели может сжаться ниже неё и вызвать наложение. */
 .calendar-game-card {
   display: grid;
-  height: auto;
+  height: var(--calendar-game-card-height);
+  min-height: var(--calendar-game-card-height);
   min-width: 0;
-  min-height: 0;
-  aspect-ratio: var(--calendar-game-card-ratio) / 1;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 

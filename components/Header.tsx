@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import { appVersion } from "@/lib/app-version";
 import { tFor } from "@/lib/i18n";
 import type { ThemePreference } from "@/lib/theme-mode";
 import type { Lang } from "@/lib/types";
@@ -37,8 +38,11 @@ export function Header({
   ].join("|");
   return (
     <header className="app-shell flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-zinc-200 dark:border-zinc-800 px-3 py-2">
-      <Link href="/" className="font-semibold tracking-tight text-base">
-        {t("app.title")}
+      <Link href="/" className="flex items-baseline gap-2 font-semibold tracking-tight text-base">
+        <span>{t("app.title")}</span>
+        <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
+          {appVersion}
+        </span>
       </Link>
       <nav className="flex items-center gap-2 text-xs ml-2">
         <Link href="/calendar" className="hover:underline">

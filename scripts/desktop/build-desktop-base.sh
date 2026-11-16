@@ -5,7 +5,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-desktop-base:latest}"
-DOCKERFILE="${DOCKERFILE:-desktop_version/linux/Dockerfile.base}"
+DOCKERFILE="${DOCKERFILE:-desktop/Dockerfile.base}"
 
 node scripts/version.mjs sync
 

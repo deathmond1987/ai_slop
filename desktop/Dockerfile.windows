@@ -7,7 +7,7 @@ ENV CARGO_HOME=/usr/local/cargo
 ENV RUSTUP_HOME=/usr/local/rustup
 ENV PATH="/usr/local/cargo/bin:${PATH}"
 ENV STEAM_CALENDAR_TARGET_TRIPLE=x86_64-pc-windows-msvc
-ENV STEAM_CALENDAR_NODE_BINARY=/workspace/desktop_version/linux/.build/node-windows/node.exe
+ENV STEAM_CALENDAR_NODE_BINARY=/workspace/desktop/.build/node-windows/node.exe
 ENV XWIN_CACHE_DIR=/usr/local/share/xwin
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,18 +34,18 @@ RUN cargo-xwin --version
 COPY . .
 
 RUN mkdir -p /usr/share/nsis/Include/Win && \
-  cp /workspace/desktop_version/linux/nsis/Win/RestartManager.nsh /usr/share/nsis/Include/Win/RestartManager.nsh
+  cp /workspace/desktop/nsis/Win/RestartManager.nsh /usr/share/nsis/Include/Win/RestartManager.nsh
 
-RUN node desktop_version/linux/scripts/fetch-windows-node.mjs
-RUN node desktop_version/linux/scripts/build-sidecar.mjs
+RUN node desktop/scripts/fetch-windows-node.mjs
+RUN node desktop/scripts/build-sidecar.mjs
 
-RUN cd desktop_version/linux/.build/app && \
+RUN cd desktop/.build/app && \
   (HOSTNAME=127.0.0.1 PORT=3721 NODE_ENV=production DB_SQLITE_PATH=/tmp/steam-calendar.sqlite AUTH_BASE_URL=http://127.0.0.1:3721 COOKIE_SECURE=false node server.js &) && \
   sleep 2 && \
   curl -fsS http://127.0.0.1:3721/api/health && \
   curl -fsS http://127.0.0.1:3721/ >/dev/null
 
-WORKDIR /workspace/desktop_version/linux/src-tauri
+WORKDIR /workspace/desktop/src-tauri
 RUN cargo-xwin build --target x86_64-pc-windows-msvc
 
 WORKDIR /workspace

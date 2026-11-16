@@ -33,7 +33,8 @@ next-env.d.ts
 *.sqlite-wal
 *.sqlite-shm
 *.tsbuildinfo
-desktop_version/linux/.build
-desktop_version/linux/dist
-desktop_version/linux/src-tauri/target
-desktop_version/linux/src-tauri/binaries
+desktop/.build
+desktop/dist
+desktop/src-tauri/target
+desktop/src-tauri/binaries
+desktop/src-tauri/gen

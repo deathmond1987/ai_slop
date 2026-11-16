@@ -31,15 +31,15 @@ RUN curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y --pr
 
 COPY . .
 
-RUN node desktop_version/linux/scripts/build-sidecar.mjs
+RUN node desktop/scripts/build-sidecar.mjs
 
-RUN cd desktop_version/linux/.build/app && \
+RUN cd desktop/.build/app && \
   (HOSTNAME=127.0.0.1 PORT=3721 NODE_ENV=production DB_SQLITE_PATH=/tmp/steam-calendar.sqlite AUTH_BASE_URL=http://127.0.0.1:3721 COOKIE_SECURE=false node server.js &) && \
   sleep 2 && \
   curl -fsS http://127.0.0.1:3721/api/health && \
   curl -fsS http://127.0.0.1:3721/ >/dev/null
 
-WORKDIR /workspace/desktop_version/linux/src-tauri
+WORKDIR /workspace/desktop/src-tauri
 RUN cargo build
 
 WORKDIR /workspace

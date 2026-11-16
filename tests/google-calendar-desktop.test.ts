@@ -24,13 +24,13 @@ const desktopLinksSource = readFileSync(
 );
 const capabilities = JSON.parse(
   readFileSync(
-    new URL("../desktop_version/linux/src-tauri/capabilities/default.json", import.meta.url),
+    new URL("../desktop/src-tauri/capabilities/default.json", import.meta.url),
     "utf8",
   ),
 );
 const sidecarCapabilities = JSON.parse(
   readFileSync(
-    new URL("../desktop_version/linux/src-tauri/capabilities/sidecar.json", import.meta.url),
+    new URL("../desktop/src-tauri/capabilities/sidecar.json", import.meta.url),
     "utf8",
   ),
 );

@@ -1,6 +1,6 @@
-# Linux Desktop Build
+# Desktop Build
 
-This folder contains the Tauri 2 Linux desktop wrapper for Steam Calendar.
+This folder contains the Tauri 2 desktop wrapper for Steam Calendar.
 
 The desktop app does not run Next.js inside the WebView. It starts a local Node.js sidecar and redirects the Tauri window to the Next.js standalone server.
 
@@ -12,9 +12,13 @@ The desktop app does not run Next.js inside the WebView. It starts a local Node.
 - `src-tauri/binaries/`: generated target-specific sidecar binary source. This folder is generated and ignored.
 - `.build/app/`: staged Next.js standalone app copied into the Tauri bundle as `app`.
 - `scripts/build-sidecar.mjs`: stages `.build/app`, copies the current Node executable to target-specific sidecar binary names, and copies a dev sidecar into `src-tauri/target/debug`.
-- `scripts/gen-icons.mjs`: generates PNG icons without external image tools.
+- `scripts/gen-icons.mjs`: regenerates desktop icons from `assets/app-icon.svg` using the bundled Tauri icon generator.
+- `assets/app-icon.svg`: source desktop icon combining Steam-style circular geometry with a calendar page along the diagonal.
 - `web/index.html`: Tauri shell page that polls sidecar status and redirects to the local app.
-- `Dockerfile.build`: validates the Linux build with Tauri webkit/GTK dependencies.
+- Repository root `build-desktop-binary.sh`: single entry point that runs the Linux and Windows packaging flows from these `desktop` components.
+- `Dockerfile.base`: shared desktop builder base image.
+- `Dockerfile.linux`: validates and builds the Linux desktop packages with Tauri webkit/GTK dependencies.
+- `Dockerfile.windows`: cross-builds the Windows NSIS installer with `cargo-xwin` and NSIS.
 
 ## Local Sidecar Validation
 
@@ -23,8 +27,8 @@ Build the Next.js standalone output:
 ```bash
 npm ci
 npm run build
-node desktop_version/linux/scripts/gen-icons.mjs
-node desktop_version/linux/scripts/build-sidecar.mjs
+node desktop/scripts/gen-icons.mjs
+node desktop/scripts/build-sidecar.mjs
 ```
 
 Start the staged sidecar manually:
@@ -36,7 +40,7 @@ NODE_ENV=production \
 DB_SQLITE_PATH=/tmp/steam-calendar-desktop.sqlite \
 AUTH_BASE_URL=http://127.0.0.1:3721 \
 COOKIE_SECURE=false \
-node desktop_version/linux/.build/app/server.js
+node desktop/.build/app/server.js
 ```
 
 Probe health:
@@ -68,7 +72,7 @@ npm install -D @tauri-apps/cli
 Run the desktop app:
 
 ```bash
-npm run tauri --prefix desktop_version/linux dev
+npm run tauri --prefix desktop dev
 ```
 
 If a global or npx Tauri CLI is preferred:
@@ -77,14 +81,14 @@ If a global or npx Tauri CLI is preferred:
 npx --yes @tauri-apps/cli dev
 ```
 
-Run that from `desktop_version/linux/src-tauri`.
+Run that from `desktop/src-tauri`.
 
 ## All Supported Desktop Builds
 
 Build Linux and Windows desktop artifacts with one script:
 
 ```bash
-bash build/all.sh
+bash build-desktop-binary.sh all
 ```
 
 or:
@@ -97,10 +101,10 @@ npm run build:all
 
 Use Docker for reproducible Linux packaging because Tauri on Linux needs webkit/GTK system libraries.
 
-The top-level wrapper script is:
+The top-level desktop build script is:
 
 ```bash
-bash build/linux.sh
+bash build-desktop-binary.sh linux
 ```
 
 or:
@@ -111,7 +115,7 @@ npm run build:linux
 
 This wrapper runs:
 
-1. `scripts/desktop/build-linux-docker.sh`: builds `steam-calendar-linux-build:latest` from `desktop_version/linux/Dockerfile.build`.
+1. `scripts/desktop/build-linux-docker.sh`: builds `steam-calendar-linux-build:latest` from `desktop/Dockerfile.linux`.
 2. `scripts/desktop/export-linux-packages.sh`: copies normalized `.deb`, `.rpm` and AppImage artifacts from the build image into `out/linux`, then converts the exported `.deb` into an Arch Linux package using `archlinux:latest`.
 
 The expected artifacts are:
@@ -155,7 +159,7 @@ npm run desktop:build:linux
 which stages the Next.js standalone sidecar and runs:
 
 ```bash
-tauri build --config desktop_version/linux/src-tauri/tauri.conf.json --bundles deb rpm appimage --ci
+tauri build --config desktop/src-tauri/tauri.conf.json --bundles deb rpm appimage --ci
 ```
 
 Build a single Linux bundle directly when the host already has Tauri/GTK/webkit dependencies:
@@ -181,7 +185,7 @@ docker run --rm steam-calendar-linux-build bash -lc '
   export LIBGL_ALWAYS_SOFTWARE=1
   export NO_AT_BRIDGE=1
   export DB_SQLITE_PATH=/tmp/steam-calendar-desktop-validation.sqlite
-  ./desktop_version/linux/src-tauri/target/release/steam-calendar-desktop >/tmp/desktop.log 2>&1 &
+  ./desktop/src-tauri/target/release/steam-calendar-desktop >/tmp/desktop.log 2>&1 &
   until curl -fsS http://127.0.0.1:3721/api/health >/tmp/health.json 2>/dev/null; do
     if ! pgrep -f steam-calendar-desktop >/dev/null; then
       echo "desktop process exited before sidecar became ready" >&2
@@ -220,10 +224,10 @@ sidecar ready on port 3721
 
 Windows installer packaging is also Docker-based and writes artifacts to `out/windows`.
 
-Top-level wrapper script:
+Top-level desktop build script:
 
 ```bash
-bash build/windows.sh
+bash build-desktop-binary.sh windows
 ```
 
 or:
@@ -234,7 +238,7 @@ npm run build:windows
 
 This wrapper runs:
 
-1. `scripts/desktop/build-windows-docker.sh`: builds `steam-calendar-windows-build:latest` from `desktop_version/linux/Dockerfile.build.windows`.
+1. `scripts/desktop/build-windows-docker.sh`: builds `steam-calendar-windows-build:latest` from `desktop/Dockerfile.windows`.
 2. `scripts/desktop/export-windows-packages.sh`: copies the NSIS installer from the build image into `out/windows`.
 
 The expected artifact is:
@@ -246,7 +250,7 @@ out/windows/steam-calendar_<version>_x64-setup.exe
 The Windows image installs `cargo-xwin`, adds `x86_64-pc-windows-msvc`, fetches a Windows `node.exe` for the sidecar, and runs:
 
 ```bash
-tauri build --config desktop_version/linux/src-tauri/tauri.windows.conf.json --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis --ci
+tauri build --config desktop/src-tauri/tauri.windows.conf.json --runner cargo-xwin --target x86_64-pc-windows-msvc --bundles nsis --ci
 ```
 
 The installer is an unsigned NSIS executable and contains `steam-calendar-desktop.exe`, `steam-calendar-node.exe`, and the uninstaller.

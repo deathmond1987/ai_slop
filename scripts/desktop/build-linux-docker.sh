@@ -6,7 +6,7 @@ cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-linux-build:latest}"
 BASE_IMAGE="${BASE_IMAGE:-steam-calendar-desktop-base:latest}"
-DOCKERFILE="${DOCKERFILE:-desktop_version/linux/Dockerfile.build}"
+DOCKERFILE="${DOCKERFILE:-desktop/Dockerfile.linux}"
 
 node scripts/version.mjs sync
 

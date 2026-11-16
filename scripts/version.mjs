@@ -9,9 +9,9 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 const packageJsonPath = path.join(repoRoot, "package.json");
 const packageLockPath = path.join(repoRoot, "package-lock.json");
-const cargoTomlPath = path.join(repoRoot, "desktop_version/linux/src-tauri/Cargo.toml");
-const tauriConfPath = path.join(repoRoot, "desktop_version/linux/src-tauri/tauri.conf.json");
-const tauriWindowsConfPath = path.join(repoRoot, "desktop_version/linux/src-tauri/tauri.windows.conf.json");
+const cargoTomlPath = path.join(repoRoot, "desktop/src-tauri/Cargo.toml");
+const tauriConfPath = path.join(repoRoot, "desktop/src-tauri/tauri.conf.json");
+const tauriWindowsConfPath = path.join(repoRoot, "desktop/src-tauri/tauri.windows.conf.json");
 const semverPattern = /^([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?$/;
 
 function runGit(args) {

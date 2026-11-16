@@ -2,20 +2,6 @@
 
 import { useEffect } from "react";
 
-interface TauriShell {
-  open: (path: string) => Promise<unknown>;
-}
-
-interface TauriGlobal {
-  shell?: { open?: TauriShell["open"] };
-}
-
-declare global {
-  interface Window {
-    __TAURI__?: TauriGlobal;
-  }
-}
-
 export function DesktopExternalLinks() {
   useEffect(() => {
     const openExternal = window.__TAURI__?.shell?.open;

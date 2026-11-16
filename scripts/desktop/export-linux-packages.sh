@@ -11,7 +11,7 @@ PULL_IMAGE="${PULL_IMAGE:-0}"
 node scripts/version.mjs sync
 VERSION="${VERSION:-$(node scripts/version.mjs get)}"
 ARCH="${ARCH:-amd64}"
-BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop_version/linux/src-tauri/target/release/bundle}"
+BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop/src-tauri/target/release/bundle}"
 
 if [ "$PULL_IMAGE" = "1" ]; then
   docker pull "$IMAGE" >/dev/null

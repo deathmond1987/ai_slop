@@ -66,7 +66,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return new NextResponse(body, {
       headers: {
         "cache-control": "no-store",
-        "content-disposition": "inline; filename=steam-calendar.ics",
+        "content-disposition": "attachment; filename=steam-calendar.ics",
         "content-type": "text/calendar; charset=utf-8",
         "x-robots-tag": "noindex, nofollow",
       },
