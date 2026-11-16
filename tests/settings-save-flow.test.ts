@@ -23,6 +23,9 @@ after(() => {
 const authStore = await import("../lib/auth-store.ts");
 const pageSource = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
 const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+const actionSource = readFileSync(new URL("../app/actions/settings.ts", import.meta.url), "utf8");
+const langRouteSource = readFileSync(new URL("../app/auth/lang/route.ts", import.meta.url), "utf8");
+const themeRouteSource = readFileSync(new URL("../app/theme/route.ts", import.meta.url), "utf8");
 
 test("settings page keeps each saved setting independent from remove controls", () => {
   const settingNames = ["steamApiKey", "rawgApiKey", "storeCc"];
@@ -57,6 +60,32 @@ test("settings page keeps each saved setting independent from remove controls", 
   assert.ok(pageSource.includes('value="steam"'));
   assert.ok(pageSource.includes('value="rawg"'));
   assert.ok(pageSource.includes('value="store"'));
+});
+
+test("settings cards anchor save and remove controls with transient applied feedback", () => {
+  assert.ok(!pageSource.includes("settings-flash"));
+  assert.ok(!globalsSource.includes(".settings-flash"));
+  assert.ok(pageSource.includes('className="settings-applied settings-applied-save"'));
+  assert.ok(pageSource.includes('className="settings-applied settings-applied-remove"'));
+  assert.ok(globalsSource.includes("@keyframes settings-applied-fade"));
+  assert.match(globalsSource, /\.settings-card \{[\s\S]*?position: relative;/);
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\) \.settings-save-btn \{[\s\S]*?position: absolute;[\s\S]*?left: calc\(0\.5rem \* var\(--ui-scale\)\);/
+  );
+  assert.match(
+    globalsSource,
+    /body:has\(\.settings-page\) \.settings-remove-btn \{[\s\S]*?position: absolute;[\s\S]*?right: calc\(0\.5rem \* var\(--ui-scale\)\);/
+  );
+  assert.ok(actionSource.includes('savedTarget = "steam-remove"'));
+  assert.ok(actionSource.includes('savedTarget = "rawg-remove"'));
+  assert.ok(actionSource.includes('savedTarget = "store-remove"'));
+  assert.ok(actionSource.includes('savedTarget = "steam-save"'));
+  assert.ok(actionSource.includes('savedTarget = "rawg-save"'));
+  assert.ok(actionSource.includes('savedTarget = "store-save"'));
+  assert.ok(actionSource.includes("redirect(`/settings?saved=${encodeURIComponent(savedTarget)}`)"));
+  assert.ok(langRouteSource.includes("/settings?saved=lang"));
+  assert.ok(themeRouteSource.includes('url.searchParams.set("saved", "theme")'));
 });
 
 test("settings page uses compact calendar-like typography without page scroll", () => {

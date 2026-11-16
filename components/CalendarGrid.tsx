@@ -2,8 +2,11 @@ import type { CSSProperties, ReactNode } from "react";
 import type { CalendarDay } from "@/lib/calendar";
 import {
   computeCalendarCellLayouts,
+  computeCalendarColumnOccupancy,
+  computeCalendarColumnTracks,
   computeCalendarColumnWeights,
   computeCalendarRowWeights,
+  computeCalendarRowsMinWidth,
 } from "@/lib/calendar-layout";
 import { formatTemplate, tFor } from "@/lib/i18n-core";
 import type { Lang, UpcomingGame } from "@/lib/types";
@@ -33,13 +36,15 @@ export function CalendarGrid({
   }
 
   const columnWeights = computeCalendarColumnWeights(grid, byDate);
+  const occupiedColumns = computeCalendarColumnOccupancy(grid, byDate);
   const cellLayouts = computeCalendarCellLayouts(grid, byDate, columnWeights);
   const rowWeights = computeCalendarRowWeights(grid, byDate, cellLayouts);
-  const gridStyle = {
-    gridTemplateColumns: columnWeights.map((weight) => `minmax(0, ${weight}fr)`).join(" "),
-  } as CSSProperties;
+  // Пустые будни могут сжиматься до 0, занятые будни и карточки держат минимальную ширину.
+  const calendarColumns = computeCalendarColumnTracks(columnWeights, occupiedColumns).join(" ");
+  const calendarMinWidth = computeCalendarRowsMinWidth(columnWeights, occupiedColumns);
   // Недели с играми получают авто-высоту под карточку, пустые недели делят остаток высоты.
   const calendarRowsStyle = {
+    gridTemplateColumns: calendarColumns,
     gridTemplateRows: `minmax(var(--calendar-row-header-min), var(--calendar-row-header-max)) ${rowWeights
       .map((weight) => {
         const isCardRow = weight > 1;
@@ -47,6 +52,7 @@ export function CalendarGrid({
         return "1fr";
       })
       .join(" ")}`,
+    minWidth: calendarMinWidth,
   } as CSSProperties;
 
   return (
@@ -66,10 +72,10 @@ export function CalendarGrid({
         )}
         <div className="calendar-grid-scroll min-h-0 overflow-auto">
           <div
-            className="calendar-grid-rows flex flex-col gap-px rounded border border-zinc-200 bg-zinc-200 text-scale-10 dark:border-zinc-800 dark:bg-zinc-800"
+            className="calendar-grid-rows rounded border border-zinc-200 bg-zinc-200 text-scale-10 dark:border-zinc-800 dark:bg-zinc-800"
             style={calendarRowsStyle}
           >
-            <div className="calendar-grid-header grid gap-px" style={gridStyle}>
+            <div className="calendar-grid-header">
               {weekdays.map((weekday) => (
                 <div
                   key={weekday}
@@ -84,20 +90,19 @@ export function CalendarGrid({
               const rowWeight = rowWeights[rowIndex] ?? 1;
               const rowClass = rowWeight > 1 ? "calendar-week-row-cards" : "calendar-week-row-empty";
 
-              return (
-                <div key={rowKey} className={`calendar-week-row ${rowClass} grid gap-px`} style={gridStyle}>
-                  {row.map((cell, index) => {
-                    const games = byDate.get(cell.iso) ?? [];
-                    const layout = cellLayouts[rowIndex * 7 + index];
-                    const columnWeight = columnWeights[index];
+                return (
+                  <div key={rowKey} className={`calendar-week-row ${rowClass}`}>
+                    {row.map((cell, index) => {
+                      const games = byDate.get(cell.iso) ?? [];
+                      const layout = cellLayouts[rowIndex * 7 + index];
                     const visibleCount = layout.visibleCount;
                     const hiddenCount = layout.hiddenCount;
                     const visibleGames = games.slice(0, visibleCount);
                     const hiddenGames = games.slice(visibleCount);
-                    const contentSlots = visibleCount > 0 ? Math.max(columnWeight, visibleCount) : 0;
+                    const contentSlots = visibleCount;
                     const contentStyle =
                       contentSlots > 1
-                        ? ({ gridTemplateColumns: `repeat(${contentSlots}, minmax(0, 1fr))` } as CSSProperties)
+                        ? ({ gridTemplateColumns: `repeat(${contentSlots}, var(--calendar-game-card-min-track))` } as CSSProperties)
                         : undefined;
                     const weekday = weekdays[index] ?? "";
 

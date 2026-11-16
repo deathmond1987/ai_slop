@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   computeCalendarCellLayouts,
+  computeCalendarColumnOccupancy,
+  computeCalendarColumnTracks,
   computeCalendarColumnWeights,
   computeCalendarRowWeights,
+  computeCalendarRowsMinWidth,
   GRID_DAY_VISIBLE_CAP,
   GRID_WEEK_ROW_WEIGHT_CAP,
 } from "../lib/calendar-layout.ts";
@@ -147,17 +150,112 @@ test("calendar week-row tracks keep card rows fixed and empty rows fill leftover
   assert.doesNotMatch(globalsSource, /--calendar-row-empty-max:/);
 });
 
-// Проверка персистентной высоты карточки: высота зафиксирована и не зависит от фактической ширины колонки.
-test("calendar game cards use a persistent fixed vertical height", () => {
+// Проверка персистентной высоты и неисчезающей ширины карточки: трек держит card-min-track, но не через --calendar-game-card-width.
+test("calendar game cards use a persistent fixed vertical height and non-compressible track width", () => {
   const globalsSource = readFileSync("app/globals.css", "utf8");
   const cardRule = globalsSource.match(/\.calendar-game-card\s*{[^}]*}/)?.[0] ?? "";
   const dayCellRule = globalsSource.match(/\n\.calendar-day-cell\s*{[^}]*}/)?.[0] ?? "";
 
   assert.match(globalsSource, /--calendar-game-card-height: var\(--calendar-row-card-min\);/);
+  assert.doesNotMatch(globalsSource, /--calendar-game-card-width:/);
+  assert.match(globalsSource, /--calendar-day-card-gap: 1px;/);
+  assert.match(cardRule, /min-width: 0;/);
   assert.match(cardRule, /height: var\(--calendar-game-card-height\);/);
   assert.match(cardRule, /min-height: var\(--calendar-game-card-height\);/);
-  assert.doesNotMatch(cardRule, /height: auto;|min-height: 0;|aspect-ratio:/);
+  assert.doesNotMatch(cardRule, /height: auto;|width: var\(--calendar-game-card-width\);|min-width: var\(--calendar-game-card-width\);|aspect-ratio:/);
+  assert.match(globalsSource, /\.calendar-day-content\s*{[\s\S]*grid-auto-columns: var\(--calendar-game-card-min-track\);/);
+  assert.doesNotMatch(globalsSource, /grid-auto-columns: minmax\(var\(--calendar-game-card-min-track\), 1fr\);/);
+  assert.match(globalsSource, /\.calendar-day-content\s*{[\s\S]*gap: var\(--calendar-day-card-gap\);/);
+  assert.match(dayCellRule, /min-width: 0;/);
   assert.match(dayCellRule, /overflow: visible;/);
+});
+
+test("occupied calendar columns keep card width while empty columns can collapse", () => {
+  const grid = Array.from({ length: 14 }, (_, index) => cell(index));
+  const byDate = new Map<string, UpcomingGame[]>();
+  byDate.set(grid[2].iso, games(2, 1));
+  byDate.set(grid[9].iso, games(1, 10));
+
+  const occupiedColumns = computeCalendarColumnOccupancy(grid, byDate);
+
+  assert.deepEqual(occupiedColumns, [false, false, true, false, false, false, false]);
+});
+
+test("calendar column tracks use fixed occupied width and collapsible empty width", () => {
+  const occupiedMin = `calc(${GRID_DAY_VISIBLE_CAP} * (var(--calendar-game-card-min-track) + var(--calendar-day-card-gap)) - var(--calendar-day-card-gap))`;
+  const tracks = computeCalendarColumnTracks([1, 1, GRID_DAY_VISIBLE_CAP, 1, 1, 1, 1], [false, false, true, false, false, false, false]);
+
+  assert.deepEqual(tracks, [
+    "minmax(0, 1fr)",
+    "minmax(0, 1fr)",
+    `minmax(${occupiedMin}, ${GRID_DAY_VISIBLE_CAP}fr)`,
+    "minmax(0, 1fr)",
+    "minmax(0, 1fr)",
+    "minmax(0, 1fr)",
+    "minmax(0, 1fr)",
+  ]);
+});
+
+test("calendar grid minimum width sums only occupied weekday columns", () => {
+  const firstOccupiedMin = `calc(2 * (var(--calendar-game-card-min-track) + var(--calendar-day-card-gap)) - var(--calendar-day-card-gap))`;
+  const secondOccupiedMin = `calc(4 * (var(--calendar-game-card-min-track) + var(--calendar-day-card-gap)) - var(--calendar-day-card-gap))`;
+  const minWidth = computeCalendarRowsMinWidth([2, 1, GRID_DAY_VISIBLE_CAP, 1, 1, 1, 1], [true, false, true, false, false, false, false]);
+
+  assert.equal(minWidth, `calc(${firstOccupiedMin} + ${secondOccupiedMin})`);
+});
+
+// Проверка горизонтальной раскладки: занятые будни держат неисчезаемую ширину, пустые будни могут сжиматься до 0.
+test("calendar weekday column tracks preserve occupied weights and collapsible empty weights", () => {
+  const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
+  const layoutSource = readFileSync("lib/calendar-layout.ts", "utf8");
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.doesNotMatch(gridSource, /computeCalendarColumnHasCards/);
+  assert.match(gridSource, /const occupiedColumns = computeCalendarColumnOccupancy\(grid, byDate\);/);
+  assert.match(gridSource, /const calendarColumns = computeCalendarColumnTracks\(columnWeights, occupiedColumns\)\.join\(" "\);/);
+  assert.match(gridSource, /const calendarMinWidth = computeCalendarRowsMinWidth\(columnWeights, occupiedColumns\);/);
+  assert.match(gridSource, /minWidth: calendarMinWidth,/);
+  assert.match(gridSource, /repeat\(\$\{contentSlots\}, var\(--calendar-game-card-min-track\)\)/);
+  assert.doesNotMatch(gridSource, /repeat\(\$\{contentSlots\}, var\(--calendar-game-card-width\)\)/);
+  assert.doesNotMatch(gridSource, /repeat\(\$\{contentSlots\}, minmax\(var\(--calendar-game-card-min-track\), 1fr\)\)/);
+  assert.match(layoutSource, /return "minmax\(0, 1fr\)";/);
+  assert.match(layoutSource, /return `minmax\(\$\{occupiedColumnMinTrack\(weight\)\}, \$\{Math\.max\(1, weight\)\}fr\)`;/);
+  assert.ok(layoutSource.includes('return `calc(${occupiedMins.join(" + ")})`;'));
+  assert.doesNotMatch(globalsSource, /grid-auto-columns: var\(--calendar-game-card-width\);/);
+  assert.match(globalsSource, /\.calendar-week-row,\s*\.calendar-grid-header\s*{[\s\S]*min-width: 0;[\s\S]*gap: 1px;/);
+  assert.match(globalsSource, /html\.calendar-fit-viewport main \.calendar-week-row\s*{[\s\S]*min-width: 0;[\s\S]*}/);
+  assert.match(globalsSource, /html\.calendar-fit-viewport main \.calendar-day-cell\s*{[\s\S]*min-width: 0;[\s\S]*}/);
+});
+
+test("calendar grid parent has no column gap so fractional columns share continuous width", () => {
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(globalsSource, /\.calendar-grid-rows\s*{[\s\S]*column-gap: 0;[\s\S]*row-gap: 1px;/);
+  assert.doesNotMatch(globalsSource, /\.calendar-grid-rows\s*{[\s\S]*column-gap: 1px;/);
+});
+
+test("weekday columns without cards still render normal calendar day cells", () => {
+  const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.doesNotMatch(gridSource, /className="calendar-day-cell calendar-day-cell-empty"/);
+  assert.doesNotMatch(globalsSource, /\.calendar-day-cell\.calendar-day-cell-empty\s*{/);
+  assert.match(gridSource, /"calendar-day-cell bg-white dark:bg-zinc-950"/);
+});
+
+test("calendar header and week rows share parent weekday column tracks", () => {
+  const gridSource = readFileSync("components/CalendarGrid.tsx", "utf8");
+  const globalsSource = readFileSync("app/globals.css", "utf8");
+
+  assert.match(gridSource, /const calendarColumns = computeCalendarColumnTracks\(columnWeights, occupiedColumns\)\.join\(" "\);/);
+  assert.match(gridSource, /const calendarRowsStyle = \{[\s\S]*gridTemplateColumns: calendarColumns,[\s\S]*gridTemplateRows:/);
+  assert.doesNotMatch(gridSource, /style=\{gridStyle\}/);
+  assert.match(globalsSource, /\.calendar-grid-rows\s*{[\s\S]*display: grid;[\s\S]*gap: 1px;/);
+  assert.match(globalsSource, /\.calendar-week-row,\s*\.calendar-grid-header\s*{[\s\S]*grid-column: 1 \/ -1;[\s\S]*grid-template-columns: subgrid;/);
+  assert.match(
+    globalsSource,
+    /@supports not \(grid-template-columns: subgrid\)\s*\{[\s\S]*\.calendar-week-row,\s*\.calendar-grid-header\s*\{[^}]*display: contents;[^}]*\}/
+  );
 });
 
 test("calendar week rows and weekday headers are real CSS grids", () => {

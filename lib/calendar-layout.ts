@@ -43,6 +43,42 @@ export function computeCalendarCellLayouts(
   });
 }
 
+export function computeCalendarColumnOccupancy(
+  grid: CalendarDay[],
+  byDate: Map<string, UpcomingGame[]>
+): boolean[] {
+  const occupied = Array.from({ length: 7 }, () => false);
+
+  grid.forEach((cell, index) => {
+    if ((byDate.get(cell.iso)?.length ?? 0) > 0) {
+      occupied[index % 7] = true;
+    }
+  });
+
+  return occupied;
+}
+
+function occupiedColumnMinTrack(weight: number): string {
+  const safeWeight = Math.max(1, weight);
+  return `calc(${safeWeight} * (var(--calendar-game-card-min-track) + var(--calendar-day-card-gap)) - var(--calendar-day-card-gap))`;
+}
+
+export function computeCalendarColumnTracks(weights: number[], occupiedColumns: boolean[]): string[] {
+  return weights.map((weight, index) => {
+    if (!occupiedColumns[index]) return "minmax(0, 1fr)";
+    return `minmax(${occupiedColumnMinTrack(weight)}, ${Math.max(1, weight)}fr)`;
+  });
+}
+
+export function computeCalendarRowsMinWidth(weights: number[], occupiedColumns: boolean[]): string {
+  const occupiedMins = weights.flatMap((weight, index) =>
+    occupiedColumns[index] ? [occupiedColumnMinTrack(weight)] : []
+  );
+
+  if (occupiedMins.length === 0) return "0px";
+  return `calc(${occupiedMins.join(" + ")})`;
+}
+
 export function computeCalendarRowWeights(
   grid: CalendarDay[],
   byDate: Map<string, UpcomingGame[]>,

@@ -20,16 +20,16 @@
       }
 
       main {
-        width: min(520px, calc(100vw - 32px));
-        padding: 28px;
+        width: min(620px, calc(100vw - 32px));
+        padding: 34px;
         border: 1px solid rgba(231, 237, 248, 0.16);
-        border-radius: 18px;
+        border-radius: 20px;
         background: rgba(17, 24, 39, 0.86);
         box-shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
       }
 
       h1 {
-        margin: 0 0 12px;
+        margin: 0 0 16px;
         font-size: 28px;
       }
 
@@ -39,17 +39,27 @@
         color: #b8c2d0;
       }
 
+      .launcher {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 28px;
+      }
+
+      .launcher-copy {
+        flex: 1 1 auto;
+        min-width: 0;
+      }
+
       .status {
-        margin: 18px 0 24px;
-        padding: 12px 14px;
-        border-radius: 12px;
-        background: rgba(47, 129, 247, 0.14);
         color: #dce7ff;
-        font-variant-numeric: tabular-nums;
+        font-size: 20px;
+        line-height: 1.4;
       }
 
       button {
         appearance: none;
+        margin-top: 22px;
         border: 1px solid rgba(47, 129, 247, 0.45);
         border-radius: 12px;
         padding: 10px 14px;
@@ -63,36 +73,130 @@
       button[hidden] {
         display: none;
       }
+
+      .launcher-spinner {
+        position: relative;
+        width: 78px;
+        height: 78px;
+        border-radius: 50%;
+        border: 5px solid rgba(47, 129, 247, 0.16);
+        border-top-color: #2f81f7;
+        animation: launch-spin 900ms linear infinite;
+      }
+
+      .launcher-spinner-core {
+        position: absolute;
+        inset: 19px;
+        border-radius: 50%;
+        background: #2f81f7;
+        animation: launch-pulse 1.6s ease-in-out infinite;
+      }
+
+      body[data-state="error"] .launcher-spinner {
+        border-color: rgba(220, 38, 38, 0.22);
+        border-top-color: #dc2626;
+        animation: none;
+      }
+
+      body[data-state="error"] .launcher-spinner-core {
+        background: #dc2626;
+        animation: none;
+      }
+
+      @keyframes launch-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes launch-pulse {
+        0%,
+        100% {
+          transform: scale(0.68);
+          opacity: 0.45;
+        }
+
+        50% {
+          transform: scale(1);
+          opacity: 0.9;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .launcher-spinner,
+        .launcher-spinner-core {
+          animation: none;
+        }
+      }
     </style>
   </head>
-  <body>
+  <body data-state="launching">
     <main>
       <h1>Steam Calendar</h1>
-      <p>Starting the local app sidecar. This page will redirect automatically.</p>
-      <div class="status" id="status">Starting...</div>
-      <button id="restart" type="button" hidden>Restart sidecar</button>
+      <div class="launcher">
+        <div class="launcher-copy">
+          <p class="status" id="status" aria-live="polite">Application is launching...</p>
+          <button id="restart" type="button" hidden>Restart</button>
+        </div>
+        <div class="launcher-spinner" aria-hidden="true">
+          <span class="launcher-spinner-core"></span>
+        </div>
+      </div>
     </main>
 
     <script>
       const statusEl = document.getElementById("status");
       const restartBtn = document.getElementById("restart");
+      const labels = {
+        en: {
+          launching: "Application is launching...",
+          restart: "Restart",
+          unavailable: "Desktop mode is unavailable.",
+          failed: "Application failed to launch.",
+          timedOut: "Application did not launch in time.",
+          restartFailed: "Restart failed.",
+        },
+        ru: {
+          launching: "Приложение запускается...",
+          restart: "Перезапустить",
+          unavailable: "Настольный режим недоступен.",
+          failed: "Не удалось запустить приложение.",
+          timedOut: "Приложение не запустилось вовремя.",
+          restartFailed: "Не удалось перезапустить.",
+        },
+      };
+      const lang = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+      const text = labels[lang];
 
-      function showError(message) {
+      statusEl.textContent = text.launching;
+      restartBtn.textContent = text.restart;
+
+      let isPolling = false;
+
+      function showLaunching() {
+        document.body.dataset.state = "launching";
+        statusEl.textContent = text.launching;
+        restartBtn.hidden = true;
+      }
+
+      function showError(message, detail) {
+        document.body.dataset.state = "error";
         statusEl.textContent = message;
+        if (detail) console.error(detail);
         restartBtn.hidden = false;
       }
 
       async function restartSidecar() {
         restartBtn.disabled = true;
-        statusEl.textContent = "Restarting...";
+        showLaunching();
 
         try {
           await window.__TAURI__.core.invoke("restart_sidecar");
           restartBtn.disabled = false;
-          statusEl.textContent = "Restart requested";
+          pollSidecar();
         } catch (error) {
           restartBtn.disabled = false;
-          showError("Restart failed: " + String(error));
+          showError(text.restartFailed, error);
         }
       }
 
@@ -100,40 +204,42 @@
 
       async function pollSidecar() {
         if (!window.__TAURI__?.core?.invoke) {
-          showError("Tauri IPC is not available. Run this app with the Tauri CLI.");
+          showError(text.unavailable);
           return;
         }
+
+        if (isPolling) return;
+
+        isPolling = true;
+        showLaunching();
 
         for (let attempt = 0; attempt < 120; attempt += 1) {
           try {
             const status = await window.__TAURI__.core.invoke("sidecar_status");
 
             if (status.status === "ready") {
-              statusEl.textContent = "Connected to port " + status.port;
               window.location.replace("http://127.0.0.1:" + status.port + "/");
               return;
             }
 
-            if (status.status === "failed" || status.status === "exited" || status.status === "idle") {
-              showError(
-                "Sidecar status: " +
-                  status.status +
-                  ". Log: " +
-                  status.log_path
-              );
+            if (status.status === "failed" || status.status === "exited") {
+              showError(text.failed, status.log_path);
+              isPolling = false;
               return;
             }
 
-            statusEl.textContent = "Sidecar status: " + status.status + " (port " + status.port + ")";
+            if (status.status === "idle") console.debug(status);
           } catch (error) {
-            showError("Could not contact the desktop sidecar: " + String(error));
+            showError(text.failed, error);
+            isPolling = false;
             return;
           }
 
           await new Promise((resolve) => setTimeout(resolve, 250));
         }
 
-        showError("Timed out while waiting for the sidecar to become ready.");
+        showError(text.timedOut);
+        isPolling = false;
       }
 
       pollSidecar();

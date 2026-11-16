@@ -30,8 +30,10 @@
   --text-scale-8: calc(8px * var(--ui-scale));
   --calendar-feed-gap: 0.5rem;
   --calendar-row-empty-min: 2rem;
-  --calendar-row-card-min: calc(4rem * 1.5);
+  --calendar-row-card-min: calc(4rem * 1.25 * 1.1);
   --calendar-game-card-height: var(--calendar-row-card-min);
+  --calendar-game-card-min-track: calc(var(--calendar-game-card-height) * (1.3 * 1.5 / 1.1));
+  --calendar-day-card-gap: 1px;
   --calendar-row-header-min: 2rem;
   --calendar-row-header-max: var(--calendar-row-header-min);
   --calendar-year-block-title-min: calc(var(--text-scale-11) * 1.25 + 0.25rem);
@@ -166,11 +168,12 @@ body:has(.settings-page) main .settings-grid {
 
 body:has(.settings-page) .settings-card {
   box-sizing: border-box;
+  position: relative;
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: 0.25rem;
-  padding: 0.35rem 0.5rem;
+  padding: 0.35rem 0.5rem calc(2.65rem * var(--ui-scale));
   border: 1px solid var(--surface-border);
   border-radius: 0.375rem;
   background: var(--surface);
@@ -221,15 +224,39 @@ body:has(.settings-page) .settings-status {
   opacity: 0.7;
 }
 
-body:has(.settings-page) .settings-flash {
-  border-color: #86efac;
-  background: rgb(220 252 231 / 0.72);
+body:has(.settings-page) .settings-applied {
+  position: absolute;
+  z-index: 1;
+  color: #16a34a;
   font-size: var(--text-scale-10);
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  animation: settings-applied-fade 2.4s ease-out forwards;
 }
 
-html.dark body:has(.settings-page) .settings-flash {
-  border-color: #166534;
-  background: rgb(20 83 45 / 0.28);
+html.dark body:has(.settings-page) .settings-applied {
+  color: #4ade80;
+}
+
+body:has(.settings-page) .settings-applied-save {
+  left: calc(0.5rem * var(--ui-scale));
+  bottom: calc(1.95rem * var(--ui-scale));
+}
+
+body:has(.settings-page) .settings-applied-remove {
+  right: calc(0.5rem * var(--ui-scale));
+  bottom: calc(1.75rem * var(--ui-scale));
+}
+
+@keyframes settings-applied-fade {
+  0%, 70% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 body:has(.settings-page) .settings-control {
@@ -247,7 +274,10 @@ body:has(.settings-page) .settings-control {
 }
 
 body:has(.settings-page) .settings-save-btn {
-  align-self: flex-start;
+  position: absolute;
+  right: auto;
+  bottom: calc(0.25rem * var(--ui-scale));
+  left: calc(0.5rem * var(--ui-scale));
   box-sizing: border-box;
   height: calc(1.5rem * var(--ui-scale));
   padding: 0 0.5rem;
@@ -264,7 +294,10 @@ body:has(.settings-page) .settings-save-btn:hover {
 }
 
 body:has(.settings-page) .settings-remove-btn {
-  align-self: flex-start;
+  position: absolute;
+  right: calc(0.5rem * var(--ui-scale));
+  bottom: calc(0.25rem * var(--ui-scale));
+  left: auto;
   box-sizing: border-box;
   height: calc(1.35rem * var(--ui-scale));
   padding: 0 0.25rem;
@@ -292,6 +325,16 @@ body:has(.settings-page) .settings-remove-btn:hover {
 
 .calendar-grid-rows {
   display: grid;
+  min-width: 0;
+  column-gap: 0;
+  row-gap: 1px;
+}
+
+.calendar-grid-header > div {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .calendar-grid-nav {
@@ -367,12 +410,24 @@ body:has(.settings-page) .settings-remove-btn:hover {
 .calendar-week-row,
 .calendar-grid-header {
   display: grid;
-  gap: 1px;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  min-width: 0;
+  column-gap: 0;
+  row-gap: 1px;
+}
+
+@supports not (grid-template-columns: subgrid) {
+  .calendar-week-row,
+  .calendar-grid-header {
+    display: contents;
+  }
 }
 
 .calendar-day-cell {
   position: relative;
   display: grid;
+  min-width: 0;
   min-height: var(--calendar-row-card-min);
   max-height: 100%;
   grid-template-rows: auto;
@@ -384,24 +439,29 @@ body:has(.settings-page) .settings-remove-btn:hover {
   max-height: 100%;
 }
 
+.calendar-week-row .calendar-day-cell:not(:last-child),
+.calendar-grid-header > div:not(:last-child) {
+  box-shadow: inset -1px 0 0 var(--surface-border);
+}
+
 /* Карточки прижимаются к началу ячейки, чтобы лишняя высота строки не растягивала их. */
 .calendar-day-content {
   display: grid;
   min-width: 0;
   min-height: 0;
   grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  gap: 1px;
+  grid-auto-columns: var(--calendar-game-card-min-track);
+  gap: var(--calendar-day-card-gap);
   align-items: start;
   align-content: start;
 }
 
-/* Карточка сохраняет персистентную вертикальную высоту; строка недели может сжаться ниже неё и вызвать наложение. */
+/* Карточка сохраняет персистентную высоту; трек не сжимается ниже card-min-track (в 1.3× шире высоты). */
 .calendar-game-card {
   display: grid;
+  min-width: 0;
   height: var(--calendar-game-card-height);
   min-height: var(--calendar-game-card-height);
-  min-width: 0;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
@@ -706,15 +766,18 @@ body:has(.settings-page) .settings-remove-btn:hover {
   html.calendar-fit-viewport main .calendar-grid-rows {
     height: 100%;
     min-height: 0;
+    min-width: 0;
     align-content: start;
   }
 
   html.calendar-fit-viewport main .calendar-week-row {
     min-height: 0;
+    min-width: 0;
   }
 
   html.calendar-fit-viewport main .calendar-day-cell {
     min-height: 0;
+    min-width: 0;
   }
 
   html.calendar-fit-viewport main .calendar-year-only {

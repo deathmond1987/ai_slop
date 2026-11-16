@@ -6,9 +6,22 @@ import { formatSteamStoreCc } from "@/lib/store-cc";
 import { saveSettings } from "@/app/actions/settings";
 import { getThemePreference, type ThemePreference } from "@/lib/theme-mode";
 
-function isSaved(raw: string | string[] | undefined): boolean {
+const SETTINGS_SAVED_TARGETS = new Set<string>([
+  "lang",
+  "theme",
+  "steam-save",
+  "steam-remove",
+  "rawg-save",
+  "rawg-remove",
+  "store-save",
+  "store-remove",
+]);
+
+function getSettingsSavedTarget(
+  raw: string | string[] | undefined
+): string | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return value === "1";
+  return typeof value === "string" && SETTINGS_SAVED_TARGETS.has(value) ? value : null;
 }
 
 const STORE_CC_REGION_OPTIONS = [
@@ -36,8 +49,8 @@ export default async function SettingsPage({
     getThemePreference(),
   ]);
 
-  const saved = isSaved(sp.saved);
-  logDebug("settings.page.render", { saved });
+  const savedTarget = getSettingsSavedTarget(sp.saved);
+  logDebug("settings.page.render", { savedTarget });
 
   const currentStoreCc = session.storeCc ?? "";
   const storeCcOptions = [
@@ -56,12 +69,6 @@ export default async function SettingsPage({
       <h1 className="text-scale-11 font-semibold">{t("settings.title")}</h1>
 
       <div className="settings-grid">
-        {saved && (
-          <div className="settings-card settings-flash">
-            {t("settings.saved.flash")}
-          </div>
-        )}
-
         <div className="settings-card">
           <h2>{t("settings.language.label")}</h2>
           <span className="settings-status">{t(`settings.language.${lang}`)}</span>
@@ -78,8 +85,13 @@ export default async function SettingsPage({
                 {t("settings.language.en")}
               </label>
             </fieldset>
+            {savedTarget === "lang" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
             <button type="submit" className="settings-save-btn">
-              {t("settings.language.label")}
+              {t("settings.language.save")}
             </button>
           </form>
         </div>
@@ -109,6 +121,11 @@ export default async function SettingsPage({
                 </label>
               ))}
             </fieldset>
+            {savedTarget === "theme" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
             <button type="submit" className="settings-save-btn">
               {t("settings.theme.save")}
             </button>
@@ -142,12 +159,22 @@ export default async function SettingsPage({
               placeholder={t("settings.apiKey.placeholder")}
               className="settings-control"
             />
+            {savedTarget === "steam-save" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
             <button type="submit" className="settings-save-btn">
               {t("settings.apiKey.save")}
             </button>
           </form>
           {session.apiKey && (
             <form action={saveSettings}>
+              {savedTarget === "steam-remove" && (
+                <span className="settings-applied settings-applied-remove">
+                  {t("settings.applied")}
+                </span>
+              )}
               <button
                 type="submit"
                 name="remove"
@@ -175,12 +202,22 @@ export default async function SettingsPage({
               placeholder={t("settings.apiKey.placeholder")}
               className="settings-control"
             />
+            {savedTarget === "rawg-save" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
             <button type="submit" className="settings-save-btn">
               {t("settings.rawg.save")}
             </button>
           </form>
           {session.rawgApiKey && (
             <form action={saveSettings}>
+              {savedTarget === "rawg-remove" && (
+                <span className="settings-applied settings-applied-remove">
+                  {t("settings.applied")}
+                </span>
+              )}
               <button
                 type="submit"
                 name="remove"
@@ -214,12 +251,22 @@ export default async function SettingsPage({
                 </option>
               ))}
             </select>
+            {savedTarget === "store-save" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
             <button type="submit" className="settings-save-btn">
               {t("settings.storeCc.save")}
             </button>
           </form>
           {session.storeCc && (
             <form action={saveSettings}>
+              {savedTarget === "store-remove" && (
+                <span className="settings-applied settings-applied-remove">
+                  {t("settings.applied")}
+                </span>
+              )}
               <button
                 type="submit"
                 name="remove"

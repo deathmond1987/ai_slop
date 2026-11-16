@@ -23,5 +23,17 @@ export async function POST(req: NextRequest) {
     await saveUserLang(session.steamId, lang);
   }
   const referer = req.headers.get("referer");
-  return referer ? NextResponse.redirect(referer) : NextResponse.redirect(`${getExternalOrigin(req)}/`);
+  if (referer) {
+    try {
+      const target = new URL(referer);
+      if (target.pathname === "/settings") {
+        return NextResponse.redirect(`${target.origin}/settings?saved=lang`);
+      }
+    } catch {
+      // Fall back to the original referer behavior for malformed values.
+    }
+    return NextResponse.redirect(referer);
+  }
+
+  return NextResponse.redirect(`${getExternalOrigin(req)}/`);
 }

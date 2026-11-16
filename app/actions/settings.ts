@@ -14,6 +14,9 @@ export async function saveSettings(formData: FormData) {
   const rawgApiKey = String(formData.get("rawgApiKey") ?? "").trim();
   const storeCc = normalizeSteamStoreCc(String(formData.get("storeCc") ?? ""));
   const remove = String(formData.get("remove") ?? "");
+  const hasSteamApiKey = formData.has("steamApiKey");
+  const hasRawgApiKey = formData.has("rawgApiKey");
+  const hasStoreCc = formData.has("storeCc");
 
   const updates: UserSettingsUpdate = {};
 
@@ -66,5 +69,20 @@ export async function saveSettings(formData: FormData) {
     logDebug("settings.save.no_updates", { remove: remove || undefined });
   }
 
-  redirect("/settings?saved=1");
+  let savedTarget = "settings";
+  if (remove === "steam") {
+    savedTarget = "steam-remove";
+  } else if (remove === "rawg") {
+    savedTarget = "rawg-remove";
+  } else if (remove === "store") {
+    savedTarget = "store-remove";
+  } else if (hasSteamApiKey) {
+    savedTarget = "steam-save";
+  } else if (hasRawgApiKey) {
+    savedTarget = "rawg-save";
+  } else if (hasStoreCc) {
+    savedTarget = "store-save";
+  }
+
+  redirect(`/settings?saved=${encodeURIComponent(savedTarget)}`);
 }

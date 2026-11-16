@@ -447,9 +447,9 @@ async function assertCardRowsFitCardsAndEmptyRowsFillRemainingHeight(page) {
   const emptyRows = layout.rows.filter((row) => !row.isCardRow);
 
   for (const card of layout.cards) {
-    if (Math.abs(card.ratio - 1 / 1.2) > 0.04) {
+    if (Math.abs(card.ratio - 1 / 1.3) > 0.04) {
       throw new Error(
-        `Expected calendar game cards to have height/width close to 1 / 1.2, got ${card.height}px / ${card.width}px = ${card.ratio}.`
+        `Expected calendar game cards to have height/width close to 1 / 1.3, got ${card.height}px / ${card.width}px = ${card.ratio}.`
       );
     }
   }

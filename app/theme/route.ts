@@ -5,6 +5,18 @@ import { logDebug } from "@/lib/debug";
 import { getExternalOrigin, shouldUseSecureSessionCookie } from "@/lib/requestOrigin";
 import { THEME_COOKIE, parseThemePreference } from "@/lib/theme-mode";
 
+function withSettingsSavedTarget(target: string): string {
+  try {
+    const url = new URL(target);
+    if (url.pathname !== "/settings") return target;
+
+    url.searchParams.set("saved", "theme");
+    return url.toString();
+  } catch {
+    return target;
+  }
+}
+
 function safeBackUrl(req: NextRequest, referer: string | null): string | null {
   if (!referer) return null;
 
@@ -46,5 +58,5 @@ export async function POST(req: NextRequest) {
 
   const target =
     safeBackUrl(req, req.headers.get("referer")) ?? `${getExternalOrigin(req)}/`;
-  return NextResponse.redirect(target, 303);
+  return NextResponse.redirect(withSettingsSavedTarget(target), 303);
 }
