@@ -105,7 +105,7 @@
 **Статус:** реализовано на уровне workflow и документации; фактический GitHub Actions run нужно проверить после коммита и создания тега на `main`.
 
 - Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag`.
-- Триггер сборки: push tag `v*`.
+- Триггер сборки: push tag `v*`; ручное создание тега в GitHub также считается тег-пушем. Дополнительно доступен `workflow_dispatch` с required input `tag` для ручной пересборки существующего тега `v*`.
 - `preflight` job проверяет, что коммит тега достижим из ветки `main`; тег вне `main` делает workflow failed.
 - Версия релиза берется из имени тега: `v1.2.3` дает `1.2.3`, `v1.2.3-beta.1` дает pre-release `1.2.3-beta.1`.
 - Workflow сначала выполняет `preflight` и `checks` (`npm ci`, `npm run check`).
@@ -207,7 +207,7 @@
 
 **Статус:** пайплайн изменен на триггер по тегу на `main`: `.github/workflows/release.yml` выполняет `preflight`, `checks`, `docker`, desktop matrix с задачами `linux` и `windows`, затем `release`. `docker` job публикует production container image в GHCR через `GHCR_TOKEN` без automatic repository package linking. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Проверка реального GitHub Actions runs продолжается после создания тега на `main`.
 
-- Release workflow запускается push tag `v*` и проверяет, что тег достижим из ветки `main`.
+- Release workflow запускается push tag `v*` и проверяет, что тег достижим из ветки `main`; при ручном `workflow_dispatch` workflow принимает input `tag` и пересобирает существующий тег.
 - Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`; каждая задача вызывает `bash build-desktop-binary.sh <platform>`.
 - Linux task в одном job собирает `desktop-linux-packages`: `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst`.
 - Windows task в одном job собирает `desktop-windows-packages`.

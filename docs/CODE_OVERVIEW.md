@@ -141,8 +141,8 @@ Diagnostic/verification script для проверки upcoming/calendar candida
 
 ### `.github/workflows/release.yml`
 Workflow "Release desktop packages and container image from main tag":
-- triggers: push tag `v*`;
-- `preflight` job проверяет семантику тега `v...` и что коммит тега достижим из ветки `main`;
+- triggers: push tag `v*`; manual GitHub tag creation also triggers this `push: tags` event; optional `workflow_dispatch` run with required `tag` input can rebuild an existing tag;
+- `preflight` job проверяет семантику тега `v...` и что коммит тега достижим из ветки `main`; для `workflow_dispatch` preflight загружает input tag из `origin` перед проверкой достижимости;
 - `preflight` uses tag name as release version, marks pre-release when version contains `-`, и вычисляет `image_path` вида `<repository-owner>/steam-calendar`;
 - `checks` job выполняет `npm ci` и `npm run check`;
 - `docker` job собирает production container image и публикует его в GHCR через `GHCR_TOKEN` (classic personal access token с `write:packages`), чтобы пакет не связывался автоматически с репозиторием;

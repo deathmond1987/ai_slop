@@ -344,11 +344,11 @@ docker run --rm \
 
 ### Вариант 3: GitHub Actions релиз desktop-пакетов и container image по тегу на main
 
-Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag` и запускается автоматически при создании тега `v*`. Workflow проверяет, что коммит тега достижим из ветки `main`; тег вне `main` завершает сборку ошибкой.
+Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag` и запускается автоматически при создании тега `v*` через `git push` или вручную в GitHub. Workflow проверяет, что коммит тега достижим из ветки `main`; тег вне `main` завершает сборку ошибкой. Дополнительно можно запустить workflow вручную через Actions `Run workflow` и указать существующий `tag`.
 
 Workflow делает проверки `npm ci && npm run check`, затем собирает production container image, публикует его в GHCR, собирает desktop-артефакты через matrix `linux` и `windows`, скачивает desktop artifacts из Actions artifacts и создает или обновляет GitHub release с тем же тегом. `permissions` содержит только `contents: write`.
 
-Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` и запушить его. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts и container metadata.
+Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` через `git push` или вручную в GitHub. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts и container metadata.
 
 Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует `GHCR_TOKEN` — personal access token (classic) со scope `write:packages` — а не `GITHUB_TOKEN`, чтобы GHCR-пакет не связывался автоматически с репозиторием и не появлялся в разделе Packages главной страницы репозитория. Можно задать `GHCR_USERNAME`, если login-username отличается от `github.actor`.
 

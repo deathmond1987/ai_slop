@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build manually, for example v1.0.8
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -20,6 +26,8 @@ jobs:
     outputs:
       version: ${{ steps.meta.outputs.version }}
       tag: ${{ steps.meta.outputs.tag }}
+      ref: ${{ steps.meta.outputs.ref }}
+      sha: ${{ steps.meta.outputs.sha }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       image_path: ${{ steps.meta.outputs.image_path }}
     steps:
@@ -32,10 +40,32 @@ jobs:
         id: meta
         shell: bash
         env:
-          TAG_REF: ${{ github.ref_name }}
-          TAG_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          PUSH_REF_NAME: ${{ github.ref_name }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG_REF="${INPUT_TAG}"
+            if [ -z "${TAG_REF}" ]; then
+              echo "Manual dispatch requires the tag input." >&2
+              echo "Use a tag such as v1.2.3 or v1.2.3-beta.1." >&2
+              exit 1
+            fi
+
+            git fetch --no-tags origin "+refs/tags/${TAG_REF}:refs/tags/${TAG_REF}"
+            if ! git rev-parse -q --verify "refs/tags/${TAG_REF}" >/dev/null; then
+              echo "Tag ${TAG_REF} was not found in origin." >&2
+              exit 1
+            fi
+
+            TAG_SHA="$(git rev-parse "refs/tags/${TAG_REF}^{commit}" 2>/dev/null || git rev-parse "refs/tags/${TAG_REF}")"
+          else
+            TAG_REF="${PUSH_REF_NAME}"
+            TAG_SHA="${PUSH_SHA}"
+          fi
 
           if [[ ! "${TAG_REF}" =~ ^v([0-9]+\.[0-9]+(\.[0-9]+)?(-[0-9A-Za-z.-]+)?)$ ]]; then
             echo "Invalid release tag: ${TAG_REF}" >&2
@@ -63,6 +93,8 @@ jobs:
           {
             echo "version=${version}"
             echo "tag=${TAG_REF}"
+            echo "ref=refs/tags/${TAG_REF}"
+            echo "sha=${TAG_SHA}"
             echo "prerelease=${prerelease}"
             echo "image_path=${image_path}"
           } >> "${GITHUB_OUTPUT}"
@@ -75,6 +107,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -100,6 +134,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Check GHCR personal token secret
         shell: bash
@@ -140,7 +176,7 @@ jobs:
             org.opencontainers.image.source=
             org.opencontainers.image.title=Steam Calendar
             org.opencontainers.image.description=Steam Calendar container image
-            org.opencontainers.image.revision={{sha}}
+            org.opencontainers.image.revision=${{ needs.preflight.outputs.sha }}
 
       - name: Build and push container image
         id: push
@@ -170,6 +206,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Build desktop packages
         shell: bash
@@ -194,6 +232,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Download desktop packages
         uses: actions/download-artifact@v4
@@ -208,7 +248,7 @@ jobs:
           VERSION: ${{ needs.preflight.outputs.version }}
           IMAGE_PATH: ${{ needs.docker.outputs.image_path }}
           IMAGE_TAGS: ${{ needs.docker.outputs.image_tags }}
-          GITHUB_SHA: ${{ github.sha }}
+          COMMIT_SHA: ${{ needs.preflight.outputs.sha }}
         run: |
           set -euo pipefail
           assets=()
@@ -220,7 +260,7 @@ jobs:
 
           {
             printf '# Steam Calendar %s\n\n' "${VERSION}"
-            printf 'Commit: `%s`\n\n' "${GITHUB_SHA}"
+            printf 'Commit: `%s`\n\n' "${COMMIT_SHA}"
 
             if [ -n "${IMAGE_PATH}" ]; then
               printf '## Container image\n\n'
@@ -270,6 +310,7 @@ jobs:
           TAG: ${{ needs.preflight.outputs.tag }}
           VERSION: ${{ needs.preflight.outputs.version }}
           PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+          COMMIT_SHA: ${{ needs.preflight.outputs.sha }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -297,7 +338,7 @@ jobs:
           else
             create_args=(release create "${TAG}")
             if ! gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
-              create_args+=(--target "${GITHUB_SHA}")
+              create_args+=(--target "${COMMIT_SHA}")
             fi
 
             create_args+=(
