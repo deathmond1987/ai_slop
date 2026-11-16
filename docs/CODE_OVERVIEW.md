@@ -12,6 +12,7 @@
 - `deps`: устанавливает зависимости через `npm ci` на `node:24-alpine`.
 - `builder`: копирует исходники и зависимости, создаёт `public` и `data`, выполняет `npm run build`.
 - `runner`: копирует standalone `server.js`, `.next/static`, `public`, `docker/entrypoint.mjs`, запускает приложение от пользователя `node` на порту `3000`.
+- `builder` и `runner` принимают `STEAM_CALENDAR_VERSION` build arg и экспортируют его как runtime env для версии в UI.
 - Задаёт runtime env: `NODE_ENV=production`, `HOSTNAME=0.0.0.0`, `PORT=3000`, `DB_SQLITE_PATH=/app/data/steam-calendar.sqlite`, `APP_DEBUG=1`.
 
 ### `README.md`
@@ -124,6 +125,13 @@ Compose service `app`:
 - `sync` записывает версию в `package.json`, `package-lock.json`, desktop Cargo config и Tauri configs;
 - версия разрешается из `STEAM_CALENDAR_VERSION`, `APP_VERSION`, `VERSION_INPUT`, `VERSION`, GitHub Actions tag env, exact git tag at `HEAD` и fallback `package.json`.
 
+### `lib/app-version.ts`
+Server-side helper для версии в шапке UI:
+- сначала читает `STEAM_CALENDAR_VERSION`, `APP_VERSION`, `VERSION_INPUT`, `VERSION`;
+- затем GitHub tag environment (`GITHUB_REF_TYPE`, `GITHUB_REF_NAME`, `GITHUB_REF`);
+- затем nearest local git tag через `git describe --tags --abbrev=0`, если git repository доступен;
+- fallback на `package.json` и `unknown`.
+
 ### `scripts/verify-calendar-session.ts`
 Diagnostic/verification script для проверки upcoming/calendar candidates и Steam appdetails flow с сессией/steam id; запускается через `npm run verify:calendar-session`.
 
@@ -144,8 +152,8 @@ Workflow "Release desktop packages and container image from main tag":
 - triggers: push tag `v*`; manual GitHub tag creation also triggers this `push: tags` event; optional `workflow_dispatch` run with required `tag` input can rebuild an existing tag;
 - `preflight` job проверяет семантику тега `v...` и что коммит тега достижим из ветки `main`; для `workflow_dispatch` preflight загружает input tag из `origin` перед проверкой достижимости;
 - `preflight` uses tag name as release version, marks pre-release when version contains `-`, и вычисляет `image_path` вида `<repository-owner>/steam-calendar`;
-- `checks` job выполняет `npm ci` и `npm run check`;
-- `docker` job собирает production container image и публикует его в GHCR через встроенный `secrets.GITHUB_TOKEN` и `github.actor`, без внешних PAT или `GHCR_TOKEN`;
+- `checks` job выполняет `npm ci` и `npm run check`, передавая release version в `STEAM_CALENDAR_VERSION`;
+- `docker` job собирает production container image и публикует его в GHCR через встроенный `secrets.GITHUB_TOKEN` и `github.actor`, без внешних PAT или `GHCR_TOKEN`, и передает release version в `STEAM_CALENDAR_VERSION` как Docker build arg;
 - GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в Packages главной страницы репозитория;
 - `docker` job использует `linux/amd64`, `linux/arm64`, GHA cache и добавляет `latest` только для non-pre-release версий;
 - `desktop` job использует matrix `linux`/`windows`, вызывает корневой `bash build-desktop-binary.sh <platform>` и загружает artifacts из `out/linux` или `out/windows`; desktop builder images собираются локально внутри этих задач и не публикуются в registry;
@@ -326,6 +334,7 @@ Route handler for POST `/theme`.
 Server component header, рендерится из `app/layout.tsx`.
 - Локализует title/nav/lang/auth controls через `tFor(lang)`.
 - Показывает links `/calendar` и `/settings`.
+- Показывает версию сборки через `getAppVersion()` из `lib/app-version.ts`, а не через constant/hardcoded значение в компоненте.
 - Рендерит `WishlistPriceCounter` с `key={counterKey}`, где key собран из signedIn, storeCc, ready status, total/discount/currency/counts, чтобы сбрасывать client state при смене session/settings/total.
 - Показывает lang switcher form POST `/auth/lang` с кнопкой `lang=en|ru`.
 - Показывает `ThemeToggleButton` с `label={t("theme.toggle")}` как одну кнопку-иконку переключения `light`/`dark`.

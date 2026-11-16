@@ -122,6 +122,8 @@ jobs:
 
       - name: Run checks
         run: npm run check
+        env:
+          STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
 
   docker:
     name: Build and publish container image
@@ -175,6 +177,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            STEAM_CALENDAR_VERSION=${{ needs.preflight.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

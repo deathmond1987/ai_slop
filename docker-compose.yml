@@ -1,12 +1,16 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        STEAM_CALENDAR_VERSION: "${STEAM_CALENDAR_VERSION:-}"
     image: steam-calendar:latest
     restart: unless-stopped
     init: true
     ports:
       - "${PORT:-5000}:3000"
     environment:
+      STEAM_CALENDAR_VERSION: "${STEAM_CALENDAR_VERSION:-}"
       AUTH_BASE_URL: "${AUTH_BASE_URL:-http://localhost:5000}"
       APP_DEBUG: "${APP_DEBUG:-1}"
       COOKIE_SECURE: "${COOKIE_SECURE:-}"

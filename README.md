@@ -188,7 +188,7 @@ bash scripts/docker-run.sh
 
 ### Docker Compose
 
-В репозитории есть `docker-compose.yml` для релизного standalone-сервера. Он использует `build: .` и монтирует локальную папку `./data` в контейнер как `/app/data`, чтобы SQLite-файл был виден на хосте.
+В репозитории есть `docker-compose.yml` для релизного standalone-сервера. Он использует `build.context: .`, передает `STEAM_CALENDAR_VERSION` в build args и runtime environment и монтирует локальную папку `./data` в контейнер как `/app/data`, чтобы SQLite-файл был виден на хосте.
 
 Запуск с локальным портом `5000` (host port задаётся `PORT`, внутри контейнера приложение слушает `3000`):
 
@@ -224,6 +224,7 @@ npm run docker:compose:logs
 
 ```bash
 PORT=8080 \
+STEAM_CALENDAR_VERSION="1.2.3" \
 AUTH_BASE_URL="http://localhost:8080" \
 SESSION_PASSWORD="replace-with-long-random-string" \
 DB_ENCRYPTION_KEY="optional-32-byte-hex" \
@@ -348,7 +349,9 @@ Workflow `.github/workflows/release.yml` называется `Release desktop p
 
 Workflow делает проверки `npm ci && npm run check`, затем собирает production container image, публикует его в GHCR, собирает desktop-артефакты через matrix `linux` и `windows`, скачивает desktop artifacts из Actions artifacts и создает или обновляет GitHub release с тем же тегом. `permissions` содержит `contents: write` и `packages: write`.
 
-Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` через `git push` или вручную в GitHub. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts и container metadata.
+Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` через `git push` или вручную в GitHub. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts, container build args и container runtime environment.
+
+Версия в шапке приложения берется не из жесткого значения в UI, а из `STEAM_CALENDAR_VERSION`, `APP_VERSION`, `VERSION_INPUT`, `VERSION`, GitHub tag environment, nearest local git tag и fallback `package.json`. Для контейнера workflow передает версию в `STEAM_CALENDAR_VERSION` как build arg и runtime env, чтобы собранная версия совпадала с тегом релиза.
 
 Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует встроенный Actions secret `secrets.GITHUB_TOKEN` и `github.actor`; внешние PAT или `GHCR_TOKEN` не требуются. GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в разделе Packages главной страницы репозитория.
 
@@ -511,6 +514,7 @@ PORT=8080 bash scripts/docker-run.sh
 Docker runtime по умолчанию использует:
 
 ```bash
+STEAM_CALENDAR_VERSION=<build arg from release tag>
 HOSTNAME=0.0.0.0
 PORT=3000
 NODE_ENV=production

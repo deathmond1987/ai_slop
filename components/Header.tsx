@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { appVersion } from "@/lib/app-version";
+import { getAppVersion } from "@/lib/app-version";
 import { tFor } from "@/lib/i18n";
 import type { ThemePreference } from "@/lib/theme-mode";
 import type { Lang } from "@/lib/types";
@@ -26,6 +26,7 @@ export function Header({
   initialTotal?: WishlistTotalResponse;
 }) {
   const t = tFor(lang);
+  const appVersion = getAppVersion();
   const counterKey = [
     signedIn ? "in" : "out",
     storeCc ?? "",
