@@ -206,7 +206,7 @@ jobs:
           EXPORT_KIND: all
           VERIFY_ARCH: 1
           STEAM_CALENDAR_VERSION: ${{ needs.preflight.outputs.version }}
-        run: bash build-desktop-binary.sh "${{ matrix.platform }}"
+        run: bash desktop/build.sh "${{ matrix.platform }}"
 
       - name: Upload desktop packages
         uses: actions/upload-artifact@v4

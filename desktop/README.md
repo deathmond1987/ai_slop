@@ -15,7 +15,7 @@ The desktop app does not run Next.js inside the WebView. It starts a local Node.
 - `scripts/gen-icons.mjs`: regenerates desktop icons from `assets/app-icon.svg` using the bundled Tauri icon generator.
 - `assets/app-icon.svg`: source desktop icon combining Steam-style circular geometry with a calendar page along the diagonal.
 - `web/index.html`: Tauri shell page that polls sidecar status and redirects to the local app.
-- Repository root `build-desktop-binary.sh`: single entry point that runs the Linux and Windows packaging flows from these `desktop` components.
+- `desktop/build.sh`: repository-root-invoked desktop entry point that runs the Linux and Windows packaging flows from these `desktop` components.
 - `Dockerfile.base`: shared desktop builder base image.
 - `Dockerfile.linux`: validates and builds the Linux desktop packages with Tauri webkit/GTK dependencies.
 - `Dockerfile.windows`: cross-builds the Windows NSIS installer with `cargo-xwin` and NSIS.
@@ -88,7 +88,7 @@ Run that from `desktop/src-tauri`.
 Build Linux and Windows desktop artifacts with one script:
 
 ```bash
-bash build-desktop-binary.sh all
+bash desktop/build.sh all
 ```
 
 or:
@@ -104,7 +104,7 @@ Use Docker for reproducible Linux packaging because Tauri on Linux needs webkit/
 The top-level desktop build script is:
 
 ```bash
-bash build-desktop-binary.sh linux
+bash desktop/build.sh linux
 ```
 
 or:
@@ -115,8 +115,8 @@ npm run build:linux
 
 This wrapper runs:
 
-1. `scripts/desktop/build-linux-docker.sh`: builds `steam-calendar-linux-build:latest` from `desktop/Dockerfile.linux`.
-2. `scripts/desktop/export-linux-packages.sh`: copies normalized `.deb`, `.rpm` and AppImage artifacts from the build image into `out/linux`, then converts the exported `.deb` into an Arch Linux package using `archlinux:latest`.
+1. `desktop/scripts/build-linux.sh`: builds `steam-calendar-linux-build:latest` from `desktop/Dockerfile.linux`.
+2. `desktop/scripts/export-linux.sh`: copies normalized `.deb`, `.rpm` and AppImage artifacts from the build image into `out/linux`, then converts the exported `.deb` into an Arch Linux package using `archlinux:latest`.
 
 The expected artifacts are:
 
@@ -227,7 +227,7 @@ Windows installer packaging is also Docker-based and writes artifacts to `out/wi
 Top-level desktop build script:
 
 ```bash
-bash build-desktop-binary.sh windows
+bash desktop/build.sh windows
 ```
 
 or:
@@ -238,8 +238,8 @@ npm run build:windows
 
 This wrapper runs:
 
-1. `scripts/desktop/build-windows-docker.sh`: builds `steam-calendar-windows-build:latest` from `desktop/Dockerfile.windows`.
-2. `scripts/desktop/export-windows-packages.sh`: copies the NSIS installer from the build image into `out/windows`.
+1. `desktop/scripts/build-windows.sh`: builds `steam-calendar-windows-build:latest` from `desktop/Dockerfile.windows`.
+2. `desktop/scripts/export-windows.sh`: copies the NSIS installer from the build image into `out/windows`.
 
 The expected artifact is:
 

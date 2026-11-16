@@ -252,7 +252,7 @@ chmod 0755 data
 Собрать все уже поддерживаемые desktop-платформы одной командой:
 
 ```bash
-bash build-desktop-binary.sh
+bash desktop/build.sh
 # или
 npm run build:all
 ```
@@ -260,7 +260,7 @@ npm run build:all
 Собрать только Linux-артефакты в `./out/linux`:
 
 ```bash
-bash build-desktop-binary.sh linux
+bash desktop/build.sh linux
 # или
 npm run build:linux
 ```
@@ -277,7 +277,7 @@ out/linux/steam-calendar-<version>-1-x86_64.pkg.tar.zst
 Собрать только Windows installer в `./out/windows`:
 
 ```bash
-bash build-desktop-binary.sh windows
+bash desktop/build.sh windows
 # или
 npm run build:windows
 ```
@@ -355,7 +355,7 @@ Workflow делает проверки `npm ci && npm run check`, затем с�
 
 Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует встроенный Actions secret `secrets.GITHUB_TOKEN` и `github.actor`; внешние PAT или `GHCR_TOKEN` не требуются. GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в разделе Packages главной страницы репозитория.
 
-Desktop-артефакты собираются matrix-задачей через корневой `build-desktop-binary.sh`, который вызывает существующие Docker-скрипты в `scripts/desktop/`:
+Desktop-артефакты собираются matrix-задачей через `desktop/build.sh`, который вызывает Docker-скрипты в `desktop/scripts/`:
 
 - `linux`: одна задача собирает все Linux-пакеты в `out/linux` — `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux;
 - `windows`: отдельная задача собирает NSIS setup `.exe` в `out/windows`.

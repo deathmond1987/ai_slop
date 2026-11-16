@@ -13,7 +13,7 @@ import {
   toUpcomingResult,
   type AppDetailsLike,
   type OwnedGameLike,
-} from "../lib/upcoming-candidates.ts";
+} from "../../lib/upcoming-candidates.ts";
 
 type AttemptOutcome = "success" | "failure" | "error" | "skipped";
 

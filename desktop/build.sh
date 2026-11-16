@@ -3,8 +3,8 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: bash build-desktop-binary.sh [linux] [windows]
-       bash build-desktop-binary.sh all
+Usage: bash desktop/build.sh [linux] [windows]
+       bash desktop/build.sh all
 
 Builds desktop application packages from the repository root.
 Without arguments builds all supported desktop platforms: linux and windows.
@@ -17,7 +17,7 @@ Environment variables:
 USAGE
 }
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 
 platforms=()
@@ -52,14 +52,14 @@ export VERIFY_ARCH="${VERIFY_ARCH:-1}"
 for platform in "${platforms[@]}"; do
   case "$platform" in
     linux)
-      bash scripts/desktop/build-linux-docker.sh
-      bash scripts/desktop/export-linux-packages.sh
+      bash desktop/scripts/build-linux.sh
+      bash desktop/scripts/export-linux.sh
       printf 'Linux desktop artifacts are available in %s/out/linux\n' "$root"
       ls -lh out/linux
       ;;
     windows)
-      bash scripts/desktop/build-windows-docker.sh
-      bash scripts/desktop/export-windows-packages.sh
+      bash desktop/scripts/build-windows.sh
+      bash desktop/scripts/export-windows.sh
       printf 'Windows desktop artifacts are available in %s/out/windows\n' "$root"
       ls -lh out/windows
       ;;

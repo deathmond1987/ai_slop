@@ -77,7 +77,7 @@ GET https://store.steampowered.com/api/appdetails?appids=<appid>&filters=basic,r
 
 ## Эталонная реализация на Python
 
-Полный рабочий пример находится в `scripts/public_wishlist_api.py`. Он использует только Python stdlib.
+Полный рабочий пример находится в `docs/examples/public_wishlist_api.py`. Он использует только Python stdlib.
 
 ```python
 #!/usr/bin/env python3
@@ -180,7 +180,7 @@ def fetch_wishlist(steamid, with_details=False, max_details=250, delay=0.2):
 
 def main(argv):
     if len(argv) < 2:
-        print('usage: python scripts/public_wishlist_api.py <steamid> [--details]', file=sys.stderr)
+        print('usage: python docs/examples/public_wishlist_api.py <steamid> [--details]', file=sys.stderr)
         return 2
     result = fetch_wishlist(int(argv[1]), '--details' in argv[2:])
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -195,13 +195,13 @@ if __name__ == '__main__':
 Appid-only:
 
 ```bash
-python3 scripts/public_wishlist_api.py <steamid64>
+python3 docs/examples/public_wishlist_api.py <steamid64>
 ```
 
 С metadata enrichment:
 
 ```bash
-python3 scripts/public_wishlist_api.py <steamid64> --details
+python3 docs/examples/public_wishlist_api.py <steamid64> --details
 ```
 
 ## Protobuf fallback
@@ -236,7 +236,7 @@ GetWishlist:
   item field 3 uint32 date_added
 ```
 
-Старый protobuf эталонный пример сохранён в `scripts/keyless_wishlist.py`.
+Старый protobuf эталонный пример сохранён в `docs/examples/keyless_wishlist.py`.
 
 ## Как это связано с текущим проектом
 

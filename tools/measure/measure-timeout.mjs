@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const defaultBaseUrl = "http://localhost:5000";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const benchPath = path.join(scriptDir, "calendar-bench.mjs");
+const benchPath = path.join(scriptDir, "../bench/calendar-bench.mjs");
 
 const EVENT_NAMES = [
   "upcoming.phase.total",
@@ -231,7 +231,7 @@ function buildSnippets(logText) {
 }
 
 function buildCommand(opts) {
-  const parts = ["node", "scripts/measure-timeout.mjs", "--label", shellQuote(opts.label)];
+  const parts = ["node", "tools/measure/measure-timeout.mjs", "--label", shellQuote(opts.label)];
   if (opts.build) parts.push("--build");
   if (opts.clearCache) parts.push("--clear-cache");
   if (opts.noUp) parts.push("--no-up");

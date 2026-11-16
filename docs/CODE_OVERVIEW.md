@@ -23,7 +23,7 @@
 
 ### `package.json`
 Манифест npm-пакета:
-- Name: `steam-calendar`, private; версия приложения разрешается через `scripts/version.mjs`, а `package.json` служит fallback-источником версии.
+- Name: `steam-calendar`, private; версия приложения разрешается через `scripts/release/version.mjs`, а `package.json` служит fallback-источником версии.
 - `"type": "module"` для Node ESM, чтобы убрать `MODULE_TYPELESS_PACKAGE_JSON` warnings при Node tests.
 - Зависимости: `next`, `react`, `react-dom`, `cheerio`, `iron-session`, `server-only`.
 - Dev-зависимости: TypeScript, Tailwind/Turbopack, ESLint, Playwright, типы Node/React.
@@ -103,13 +103,13 @@ Compose service `app`:
 - копирует `.env.example` в `.env.local` с chmod `600`, если `.env.local` нет;
 - создаёт директорию `data/`.
 
-### `scripts/keyless_wishlist.py`
+### `docs/examples/keyless_wishlist.py`
 Вспомогательный Python-скрипт для экспериментов/проверки keyless Steam wishlist и enrichment flow; детали описаны в `docs/KEYLESS_WISHLIST.md`.
 
-### `scripts/measure-sqlite-latency.ts`
+### `tools/measure/measure-sqlite-latency.ts`
 Скрипт бенчмарка задержек SQLite `cache_entries` / cache access; запускается через `npm run measure:sqlite-latency`.
 
-### `scripts/public_wishlist_api.py`
+### `docs/examples/public_wishlist_api.py`
 Эталонный Python-скрипт из `docs/KEYLESS_WISHLIST.md`: получает public Steam wishlist через `IWishlistService/GetWishlistItemCount` и `GetWishlist`, затем обогащает appdetails через public Store API.
 
 ### `scripts/start.sh`
@@ -119,7 +119,7 @@ Compose service `app`:
 - запускает `node .next/standalone/server.js`;
 - defaults `NODE_ENV=production`, `HOSTNAME=0.0.0.0`, `PORT=3000`, `DB_SQLITE_PATH=$PWD/data/steam-calendar.sqlite`.
 
-### `scripts/version.mjs`
+### `scripts/release/version.mjs`
 Единый version resolver:
 - `get` печатает разрешенную версию без `v` prefix;
 - `sync` записывает версию в `package.json`, `package-lock.json`, desktop Cargo config и Tauri configs;
@@ -132,18 +132,18 @@ Server-side helper для версии в шапке UI:
 - затем nearest local git tag через `git describe --tags --abbrev=0`, если git repository доступен;
 - fallback на `package.json` и `unknown`.
 
-### `scripts/verify-calendar-session.ts`
+### `tools/verify/verify-calendar-session.ts`
 Diagnostic/verification script для проверки upcoming/calendar candidates и Steam appdetails flow с сессией/steam id; запускается через `npm run verify:calendar-session`.
 
 ### Desktop scripts
 
-- `build-desktop-binary.sh`: repository-root desktop build entry point for `linux`, `windows` and all supported desktop platforms; writes artifacts into `out/linux` and `out/windows`.
-- `scripts/desktop/build-desktop-base.sh`: builds the shared desktop builder base image from `desktop/Dockerfile.base`.
-- `scripts/desktop/build-linux-docker.sh`: builds the Linux desktop packaging image from `desktop/Dockerfile.linux`.
-- `scripts/desktop/export-linux-packages.sh`: exports Linux `.deb`, `.rpm`, AppImage and Arch `.pkg.tar.zst` artifacts into `out/linux`; `EXPORT_KIND=all` runs the full Linux packaging flow in one task.
-- `scripts/desktop/build-arch-package.sh`: converts the exported `.deb` into an Arch package and optionally verifies it.
-- `scripts/desktop/build-windows-docker.sh`: builds the Windows cross-build image from `desktop/Dockerfile.windows` using `cargo-xwin` and NSIS.
-- `scripts/desktop/export-windows-packages.sh`: exports the NSIS installer into `out/windows`.
+- `desktop/build.sh`: desktop build entry point for `linux`, `windows` and all supported desktop platforms; writes artifacts into `out/linux` and `out/windows`.
+- `desktop/scripts/build-base.sh`: builds the shared desktop builder base image from `desktop/Dockerfile.base`.
+- `desktop/scripts/build-linux.sh`: builds the Linux desktop packaging image from `desktop/Dockerfile.linux`.
+- `desktop/scripts/export-linux.sh`: exports Linux `.deb`, `.rpm`, AppImage and Arch `.pkg.tar.zst` artifacts into `out/linux`; `EXPORT_KIND=all` runs the full Linux packaging flow in one task.
+- `desktop/scripts/package-arch.sh`: converts the exported `.deb` into an Arch package and optionally verifies it.
+- `desktop/scripts/build-windows.sh`: builds the Windows cross-build image from `desktop/Dockerfile.windows` using `cargo-xwin` and NSIS.
+- `desktop/scripts/export-windows.sh`: exports the NSIS installer into `out/windows`.
 
 ## GitHub Actions
 
@@ -156,7 +156,7 @@ Workflow "Release desktop packages and container image from main tag":
 - `docker` job собирает production container image и публикует его в GHCR через встроенный `secrets.GITHUB_TOKEN` и `github.actor`, без внешних PAT или `GHCR_TOKEN`, и передает release version в `STEAM_CALENDAR_VERSION` как Docker build arg;
 - GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в Packages главной страницы репозитория;
 - `docker` job использует `linux/amd64`, `linux/arm64`, GHA cache и добавляет `latest` только для non-pre-release версий;
-- `desktop` job использует matrix `linux`/`windows`, вызывает корневой `bash build-desktop-binary.sh <platform>` и загружает artifacts из `out/linux` или `out/windows`; desktop builder images собираются локально внутри этих задач и не публикуются в registry;
+- `desktop` job использует matrix `linux`/`windows`, вызывает `bash desktop/build.sh <platform>` и загружает artifacts из `out/linux` или `out/windows`; desktop builder images собираются локально внутри этих задач и не публикуются в registry;
 - Linux desktop task собирает все Linux-пакеты одной задачей в `desktop-linux-packages`: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и Arch Linux `.pkg.tar.zst` из `out/linux`;
 - Windows desktop task собирает `desktop-windows-packages` для Windows NSIS setup `.exe` из `out/windows`;
 - `release` job скачивает desktop artifacts, создает или обновляет GitHub release, загружает desktop-пакеты как release assets и пишет GHCR image tags в release notes;
@@ -178,7 +178,7 @@ Workflow "Release desktop packages and container image from main tag":
 - `GetWishlistItemCount` и `GetWishlist` дают полный appid-лист без API key;
 - `wishlistdata/?p=0` без cookies ненадёжен и может вернуть HTML;
 - metadata enrichment через `store.steampowered.com/api/appdetails`;
-- описана эталонная Python-реализация в `scripts/public_wishlist_api.py`.
+- описана эталонная Python-реализация в `docs/examples/public_wishlist_api.py`.
 
 ### `desktop/README.md`
 Документация desktop-сборок: Linux packaging через Docker для `.deb`, AppImage, `.rpm` и Arch package, артефакты в `out/linux`, headless runtime check, sidecar behavior, Tauri WebView behavior для `DesktopExternalLinks`/`shell:default`, Windows cross-build через Docker/cargo-xwin и NSIS installer в `out/windows`.

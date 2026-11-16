@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-linux-build:latest}"
 OUT_DIR="${OUT_DIR:-out/linux}"
 EXPORT_KIND="${EXPORT_KIND:-all}"
 PULL_IMAGE="${PULL_IMAGE:-0}"
-node scripts/version.mjs sync
-VERSION="${VERSION:-$(node scripts/version.mjs get)}"
+node scripts/release/version.mjs sync
+VERSION="${VERSION:-$(node scripts/release/version.mjs get)}"
 ARCH="${ARCH:-amd64}"
 BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop/src-tauri/target/release/bundle}"
 
@@ -19,7 +19,7 @@ fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Missing Linux builder image: $IMAGE" >&2
-  echo "Run scripts/desktop/build-linux-docker.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
+  echo "Run desktop/scripts/build-linux.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
   exit 1
 fi
 
@@ -77,7 +77,7 @@ copy_latest_bundle() {
   artifact_path="$(find_latest_container_file "$bundle_dir" "$pattern")"
   if [ -z "$artifact_path" ]; then
     echo "Missing Linux bundle artifact: $bundle_dir/$pattern" >&2
-    echo "Run scripts/desktop/build-linux-docker.sh first." >&2
+    echo "Run desktop/scripts/build-linux.sh first." >&2
     exit 1
   fi
 
@@ -104,10 +104,10 @@ if [ "$EXPORT_KIND" = "all" ] || [ "$EXPORT_KIND" = "arch" ]; then
   deb_file="$(find "$OUT_DIR" -maxdepth 1 -type f -name 'steam-calendar_*.deb' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
   if [ -z "$deb_file" ]; then
     echo "A Debian package is required before exporting an Arch package." >&2
-    echo "Run scripts/desktop/export-linux-packages.sh with EXPORT_KIND=all or EXPORT_KIND=deb first." >&2
+    echo "Run desktop/scripts/export-linux.sh with EXPORT_KIND=all or EXPORT_KIND=deb first." >&2
     exit 1
   fi
-IMAGE="archlinux:latest" VERIFY_ARCH="${VERIFY_ARCH:-0}" DEB_FILE="$deb_file" bash scripts/desktop/build-arch-package.sh
+IMAGE="archlinux:latest" VERIFY_ARCH="${VERIFY_ARCH:-0}" DEB_FILE="$deb_file" bash desktop/scripts/package-arch.sh
 fi
 
 case "$EXPORT_KIND" in

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 IMAGE="${IMAGE:-steam-calendar-windows-build:latest}"
 OUT_DIR="${OUT_DIR:-out/windows}"
 PULL_IMAGE="${PULL_IMAGE:-0}"
-node scripts/version.mjs sync
-VERSION="${VERSION:-$(node scripts/version.mjs get)}"
+node scripts/release/version.mjs sync
+VERSION="${VERSION:-$(node scripts/release/version.mjs get)}"
 ARCH="${ARCH:-x64}"
 TARGET_TRIPLE="${TARGET_TRIPLE:-x86_64-pc-windows-msvc}"
 BUNDLE_BASE="${BUNDLE_BASE:-/workspace/desktop/src-tauri/target/${TARGET_TRIPLE}/release/bundle}"
@@ -19,7 +19,7 @@ fi
 
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Missing Windows builder image: $IMAGE" >&2
-  echo "Run scripts/desktop/build-windows-docker.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
+  echo "Run desktop/scripts/build-windows.sh first, or set PULL_IMAGE=1 after logging in to the image registry." >&2
   exit 1
 fi
 
@@ -53,7 +53,7 @@ copy_latest_bundle() {
   artifact_path="$(find_latest_container_file "$bundle_dir" "$pattern")"
   if [ -z "$artifact_path" ]; then
     echo "Missing Windows bundle artifact: $bundle_dir/$pattern" >&2
-    echo "Run scripts/desktop/build-windows-docker.sh first." >&2
+    echo "Run desktop/scripts/build-windows.sh first." >&2
     exit 1
   fi
 

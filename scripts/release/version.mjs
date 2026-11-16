@@ -6,7 +6,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDir, "..");
+const repoRoot = path.resolve(scriptDir, "..", "..");
 const packageJsonPath = path.join(repoRoot, "package.json");
 const packageLockPath = path.join(repoRoot, "package-lock.json");
 const cargoTomlPath = path.join(repoRoot, "desktop/src-tauri/Cargo.toml");
@@ -142,7 +142,7 @@ function syncVersion(version) {
 function printUsage() {
   process.stdout.write(
     [
-      "Usage: node scripts/version.mjs [get|sync]",
+      "Usage: node scripts/release/version.mjs [get|sync]",
       "  get   print the resolved app version",
       "  sync  update package.json, package-lock.json, Cargo.toml and Tauri configs",
       "",

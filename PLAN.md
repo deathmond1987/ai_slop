@@ -13,7 +13,7 @@
 
 ## 2. Перевести сборки desktop app в bash-скрипты при помощи Docker
 
-**Статус:** выполнено для Linux и Windows; сборка desktop-приложения выполняется через Docker-скрипты, а единый пользовательский вход — корневой `build-desktop-binary.sh`.
+**Статус:** выполнено для Linux и Windows; сборка desktop-приложения выполняется через Docker-скрипты, а единый пользовательский вход — `desktop/build.sh`.
 
 - Вынести логику сборки desktop-приложения в отдельные bash-скрипты.
 - Использовать Docker как основной и стабильный путь сборки.
@@ -50,10 +50,10 @@
 
 ## 6. Простые build-скрипты для всех уже поддерживаемых ОС
 
-**Статус:** выполнено; простые wrappers заменены корневым `build-desktop-binary.sh` и npm-алиасами `build:all`, `build:linux`, `build:windows`.
+**Статус:** выполнено; простые wrappers заменены `desktop/build.sh` и npm-алиасами `build:all`, `build:linux`, `build:windows`.
 
-- Собрать все поддерживаемые desktop-платформы одной командой `bash build-desktop-binary.sh`.
-- Сохранить отдельные команды для Linux и Windows: `bash build-desktop-binary.sh linux` и `bash build-desktop-binary.sh windows`.
+- Собрать все поддерживаемые desktop-платформы одной командой `bash desktop/build.sh`.
+- Сохранить отдельные команды для Linux и Windows: `bash desktop/build.sh linux` и `bash desktop/build.sh windows`.
 - Артефакты по-прежнему писать в `out/linux` и `out/windows`.
 - Обновить документацию и план под единый корневой скрипт сборки.
 
@@ -113,7 +113,7 @@
 - GHCR login использует встроенный secret `secrets.GITHUB_TOKEN` и `github.actor`; внешние PAT или `GHCR_TOKEN` не требуются.
 - `permissions` содержит `contents: write` и `packages: write`; workflow публикует GHCR-пакет через встроенный Actions token.
 - Docker labels включают `org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}`; GitHub может автоматически связать GHCR-пакет с репозиторием.
-- Desktop-пакеты собираются matrix-задачами через корневой `build-desktop-binary.sh`, который вызывает существующие Docker-скрипты в `scripts/desktop/`:
+- Desktop-пакеты собираются matrix-задачами через `desktop/build.sh`, который вызывает Docker-скрипты в `desktop/scripts/`:
   - Linux `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst` в одной Linux task;
   - Windows NSIS setup `.exe`.
 - Workflow загружает desktop-пакеты как GitHub release assets на страницу releases.
@@ -207,7 +207,7 @@
 **Статус:** пайплайн изменен на триггер по тегу на `main`: `.github/workflows/release.yml` выполняет `preflight`, `checks`, `docker`, desktop matrix с задачами `linux` и `windows`, затем `release`. `docker` job публикует production container image в GHCR через встроенный `secrets.GITHUB_TOKEN` без внешних ключей; GHCR-пакет может быть автоматически связан с репозиторием. Linux desktop task собирает все Linux-пакеты в одной задаче: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и `.pkg.tar.zst` для Arch Linux. Windows desktop task собирает NSIS installer. Проверка реального GitHub Actions runs продолжается после создания тега на `main`.
 
 - Release workflow запускается push tag `v*` и проверяет, что тег достижим из ветки `main`; при ручном `workflow_dispatch` workflow принимает input `tag` и пересобирает существующий тег.
-- Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`; каждая задача вызывает `bash build-desktop-binary.sh <platform>`.
+- Desktop-артефакты собираются через две matrix-задачи: `linux` и `windows`; каждая задача вызывает `bash desktop/build.sh <platform>`.
 - Linux task в одном job собирает `desktop-linux-packages`: `.deb`, `.rpm`, AppImage и Arch `.pkg.tar.zst`.
 - Windows task в одном job собирает `desktop-windows-packages`.
 - Не запускать лишние отдельные builder/export jobs и не публиковать desktop builder images в GHCR.
@@ -215,11 +215,11 @@
 
 ## 12. Упростить desktop-сборку до одного корневого скрипта
 
-**Статус:** выполнено локально; создан корневой `build-desktop-binary.sh`, остальные desktop-компоненты и Dockerfiles оставлены в `desktop/`, CI вызывает корневой скрипт.
+**Статус:** выполнено локально; desktop entry point перенесен в `desktop/build.sh`, остальные desktop-компоненты и Dockerfiles оставлены в `desktop/`, CI вызывает `desktop/build.sh`.
 
 - Добавить один понятный вход для desktop-сборок в корне репозитория.
 - Убрать лишние wrapper-скрипты `build/all.sh`, `build/linux.sh` и `build/windows.sh`.
-- Сохранить все внутренние `scripts/desktop/*` скрипты и Dockerfiles в существующих рабочих директориях.
+- Сохранить все внутренние desktop-скрипты и Dockerfiles внутри `desktop/`.
 - Перевести пути desktop-сборок с `desktop_version/linux/...` на `desktop/...`.
 - Сохранить artifacts в `out/linux` и `out/windows`.
 - Обновить npm scripts, `.github/workflows/release.yml`, README, desktop README и docs.

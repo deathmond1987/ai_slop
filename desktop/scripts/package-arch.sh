@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 IMAGE="${IMAGE:-archlinux:latest}"
@@ -22,7 +22,7 @@ fi
 
 if [ -z "$DEB_FILE" ]; then
   echo "No Debian package found under $OUT_DIR." >&2
-  echo "Run scripts/desktop/export-linux-packages.sh first." >&2
+  echo "Run desktop/scripts/export-linux.sh first." >&2
   exit 1
 fi
 

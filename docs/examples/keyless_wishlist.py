@@ -169,7 +169,7 @@ def fetch_wishlist(steamid, with_details=False, max_details=250, delay=0.2):
 
 def main(argv):
     if len(argv) < 2:
-        print('usage: python scripts/keyless_wishlist.py <steamid> [--details]', file=sys.stderr)
+        print('usage: python docs/examples/keyless_wishlist.py <steamid> [--details]', file=sys.stderr)
         return 2
     steamid = int(argv[1])
     with_details = '--details' in argv[2:]

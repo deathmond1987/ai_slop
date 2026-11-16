@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-IMAGE="${IMAGE:-steam-calendar-linux-build:latest}"
+IMAGE="${IMAGE:-steam-calendar-windows-build:latest}"
 BASE_IMAGE="${BASE_IMAGE:-steam-calendar-desktop-base:latest}"
-DOCKERFILE="${DOCKERFILE:-desktop/Dockerfile.linux}"
+DOCKERFILE="${DOCKERFILE:-desktop/Dockerfile.windows}"
 
-node scripts/version.mjs sync
+node scripts/release/version.mjs sync
 
 if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
-  IMAGE="$BASE_IMAGE" bash scripts/desktop/build-desktop-base.sh
+  IMAGE="$BASE_IMAGE" bash desktop/scripts/build-base.sh
 fi
 
 docker build \
