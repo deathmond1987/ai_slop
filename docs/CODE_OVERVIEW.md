@@ -145,14 +145,14 @@ Workflow "Release desktop packages and container image from main tag":
 - `preflight` job проверяет семантику тега `v...` и что коммит тега достижим из ветки `main`; для `workflow_dispatch` preflight загружает input tag из `origin` перед проверкой достижимости;
 - `preflight` uses tag name as release version, marks pre-release when version contains `-`, и вычисляет `image_path` вида `<repository-owner>/steam-calendar`;
 - `checks` job выполняет `npm ci` и `npm run check`;
-- `docker` job собирает production container image и публикует его в GHCR через `GHCR_TOKEN` (classic personal access token с `write:packages`), чтобы пакет не связывался автоматически с репозиторием;
-- GHCR package может существовать в personal/org account, но не должен появляться в Packages главной страницы репозитория, если не имеет repository source; уже существующий связанный пакет нужно один раз unlink в Package settings;
+- `docker` job собирает production container image и публикует его в GHCR через встроенный `secrets.GITHUB_TOKEN` и `github.actor`, без внешних PAT или `GHCR_TOKEN`;
+- GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в Packages главной страницы репозитория;
 - `docker` job использует `linux/amd64`, `linux/arm64`, GHA cache и добавляет `latest` только для non-pre-release версий;
 - `desktop` job использует matrix `linux`/`windows`, вызывает корневой `bash build-desktop-binary.sh <platform>` и загружает artifacts из `out/linux` или `out/windows`; desktop builder images собираются локально внутри этих задач и не публикуются в registry;
 - Linux desktop task собирает все Linux-пакеты одной задачей в `desktop-linux-packages`: `.deb` для Debian/Ubuntu, `.rpm` для RHEL/Fedora, universal AppImage и Arch Linux `.pkg.tar.zst` из `out/linux`;
 - Windows desktop task собирает `desktop-windows-packages` для Windows NSIS setup `.exe` из `out/windows`;
 - `release` job скачивает desktop artifacts, создает или обновляет GitHub release, загружает desktop-пакеты как release assets и пишет GHCR image tags в release notes;
-- workflow permissions содержит только `contents: write`; GitHub Packages publishing через `GITHUB_TOKEN` отсутствует;
+- workflow permissions содержит `contents: write` и `packages: write`; GitHub Packages publishing выполняется через встроенный `GITHUB_TOKEN`;
 - summary job пишет release URL и image path.
 
 ## Docs

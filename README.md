@@ -346,13 +346,11 @@ docker run --rm \
 
 Workflow `.github/workflows/release.yml` называется `Release desktop packages and container image from main tag` и запускается автоматически при создании тега `v*` через `git push` или вручную в GitHub. Workflow проверяет, что коммит тега достижим из ветки `main`; тег вне `main` завершает сборку ошибкой. Дополнительно можно запустить workflow вручную через Actions `Run workflow` и указать существующий `tag`.
 
-Workflow делает проверки `npm ci && npm run check`, затем собирает production container image, публикует его в GHCR, собирает desktop-артефакты через matrix `linux` и `windows`, скачивает desktop artifacts из Actions artifacts и создает или обновляет GitHub release с тем же тегом. `permissions` содержит только `contents: write`.
+Workflow делает проверки `npm ci && npm run check`, затем собирает production container image, публикует его в GHCR, собирает desktop-артефакты через matrix `linux` и `windows`, скачивает desktop artifacts из Actions artifacts и создает или обновляет GitHub release с тем же тегом. `permissions` содержит `contents: write` и `packages: write`.
 
 Для релиза достаточно создать тег вида `v1.2.3` или `v1.2.3-beta.1` на коммите из `main` через `git push` или вручную в GitHub. Workflow использует имя тега как версию релиза; версия без `v` передается desktop build/export scripts и container metadata.
 
-Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует `GHCR_TOKEN` — personal access token (classic) со scope `write:packages` — а не `GITHUB_TOKEN`, чтобы GHCR-пакет не связывался автоматически с репозиторием и не появлялся в разделе Packages главной страницы репозитория. Можно задать `GHCR_USERNAME`, если login-username отличается от `github.actor`.
-
-Если GHCR-пакет уже был создан ранее через `GITHUB_TOKEN`, его нужно один раз unlink от репозитория в настройках пакета GitHub: Package settings -> `Repository source` -> удалить связь.
+Container image публикуется в `ghcr.io/<repository-owner>/steam-calendar` для `linux/amd64` и `linux/arm64`. Для non-pre-release версий workflow добавляет `latest`. Workflow использует встроенный Actions secret `secrets.GITHUB_TOKEN` и `github.actor`; внешние PAT или `GHCR_TOKEN` не требуются. GitHub может автоматически связать GHCR-пакет с репозиторием и показать его в разделе Packages главной страницы репозитория.
 
 Desktop-артефакты собираются matrix-задачей через корневой `build-desktop-binary.sh`, который вызывает существующие Docker-скрипты в `scripts/desktop/`:
 
@@ -462,7 +460,7 @@ docker run --rm \
 
 Переменная для `scripts/docker-build.sh` и `scripts/docker-run.sh`. Имя и тег image.
 
-GitHub Actions release workflow публикует production image в `ghcr.io/<repository-owner>/steam-calendar` через `GHCR_TOKEN`, чтобы пакет не был автоматически связан с репозиторием; локальные скрипты по умолчанию используют `steam-calendar:latest`.
+GitHub Actions release workflow публикует production image в `ghcr.io/<repository-owner>/steam-calendar` через встроенный `secrets.GITHUB_TOKEN` без внешних ключей; локальные скрипты по умолчанию используют `steam-calendar:latest`.
 
 ```bash
 IMAGE=steam-calendar:latest
