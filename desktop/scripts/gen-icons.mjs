@@ -14,16 +14,12 @@ const iconsDir = path.join(desktopDir, "src-tauri", "icons");
 const tempDir = path.join(desktopDir, ".tmp-icons");
 const sourceIcon = path.join(assetsDir, "app-icon.svg");
 
-const icoSizes = [16, 24, 32, 48, 64, 128, 256];
-const pngSizes = [...icoSizes, 512];
+const pngSizes = [16, 24, 32, 48, 64, 128, 256];
 const outputIcons = [
   { name: "icon-16x16.png", sourceSize: 16 },
   { name: "icon-32x32.png", sourceSize: 32 },
-  { name: "16x16.png", sourceSize: 16 },
-  { name: "32x32.png", sourceSize: 32 },
   { name: "128x128.png", sourceSize: 128 },
   { name: "128x128@2x.png", sourceSize: 256 },
-  { name: "icon.png", sourceSize: 512 },
 ];
 
 function runTauriIcon() {
@@ -110,7 +106,7 @@ try {
 
   writeFileSync(
     path.join(iconsDir, "icon.ico"),
-    encodeIco(icoSizes.map((size) => ({ size, bytes: pngBySize.get(size) })))
+    encodeIco(pngSizes.map((size) => ({ size, bytes: pngBySize.get(size) })))
   );
 
   process.stdout.write(`Generated ${outputIcons.length + 1} desktop icon(s) from ${sourceIcon}\n`);
