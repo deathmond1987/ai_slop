@@ -36,6 +36,7 @@ async function sessionFromFeedToken(token: string): Promise<IdentifiedSession | 
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const feedToken = req.nextUrl.searchParams.get("token");
+  const openInline = req.nextUrl.searchParams.get("open") === "1";
   let session: IdentifiedSession | null = null;
 
   if (feedToken) {
@@ -66,7 +67,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return new NextResponse(body, {
       headers: {
         "cache-control": "no-store",
-        "content-disposition": "attachment; filename=steam-calendar.ics",
+        "content-disposition": openInline
+          ? "inline; filename=steam-calendar.ics"
+          : "attachment; filename=steam-calendar.ics",
         "content-type": "text/calendar; charset=utf-8",
         "x-robots-tag": "noindex, nofollow",
       },

@@ -68,7 +68,7 @@ export interface AppDetails {
   developer?: string[];
   publisher?: string[];
   header_image?: string;
-  genres?: { type: string; description: string }[];
+  genres?: { id?: string; type?: string; description: string }[];
   release_date?: { date: string; coming_soon: boolean };
   fullgame?: { appid: string | number; name?: string };
   price_overview?: SteamPriceOverview;
@@ -338,7 +338,7 @@ async function fetchAppDetails(
   const normalizedStoreCc = normalizeSteamStoreCc(storeCc);
   const params = new URLSearchParams({
     appids: String(appid),
-    filters: "basic,release_date,price_overview",
+    filters: "basic,genres,release_date,price_overview",
     l: "en",
   });
   if (normalizedStoreCc) params.set("cc", normalizedStoreCc);

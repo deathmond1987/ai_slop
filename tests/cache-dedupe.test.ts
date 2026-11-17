@@ -128,7 +128,7 @@ test("loadWithCacheAndDedupe does not cache transient appdetails misses", async 
   let calls = 0;
 
   const options = () => ({
-    cacheKey: "appdetails:123:kz",
+    cacheKey: "appdetails:v2:123:kz",
     pending,
     cacheGet: cache.get,
     cacheSet: cache.set,
@@ -143,7 +143,7 @@ test("loadWithCacheAndDedupe does not cache transient appdetails misses", async 
   assert.equal(await loadWithCacheAndDedupe(options()), APP_DETAILS_TRANSIENT_MISS);
   assert.equal(calls, 2);
   assert.equal(cache.sets.length, 0);
-  assert.equal(cache.values.get("appdetails:123:kz"), undefined);
+  assert.equal(cache.values.get("appdetails:v2:123:kz"), undefined);
 });
 
 test("Steam appdetails cache TTLs distinguish negative, volatile and stable values", () => {
@@ -169,14 +169,14 @@ test("Steam appdetails cache TTLs distinguish negative, volatile and stable valu
 
 test("Steam cache keys use stable hashed key segments", () => {
   assert.equal(ownedCacheKey("10000000000000000", "steam-key", "hash123"), "owned:10000000000000000:hash123");
-  assert.equal(appDetailsCacheKey(123), "appdetails:123");
+  assert.equal(appDetailsCacheKey(123), "appdetails:v2:123");
 });
 
 test("Steam appdetails cache keys are regional only when storeCc is present", () => {
-  assert.equal(appDetailsCacheKey(123, null), "appdetails:123");
-  assert.equal(appDetailsCacheKey(123, "DE"), "appdetails:123:de");
-  assert.equal(appDetailsCacheKey(123, " de "), "appdetails:123:de");
-  assert.equal(appDetailsCacheKey(123, "invalid"), "appdetails:123");
+  assert.equal(appDetailsCacheKey(123, null), "appdetails:v2:123");
+  assert.equal(appDetailsCacheKey(123, "DE"), "appdetails:v2:123:de");
+  assert.equal(appDetailsCacheKey(123, " de "), "appdetails:v2:123:de");
+  assert.equal(appDetailsCacheKey(123, "invalid"), "appdetails:v2:123");
 });
 
 test("RAWG cache keys and TTLs are stable and negative-aware", () => {

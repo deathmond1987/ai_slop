@@ -3,6 +3,10 @@ import type { NextRequest } from "next/server";
 import { collectSignedOpenIdParams } from "@/lib/auth";
 import { logDebug, sanitizeDebugError } from "@/lib/debug";
 import { verifySteamOpenId } from "@/lib/openid-verify";
+import {
+  clearPendingOnboardingSettings,
+  readPendingOnboardingSettings,
+} from "@/lib/onboarding";
 import { getSteamSession, saveSteamSession } from "@/lib/session";
 import { extractSteamIdFromOpenId, getSteamProfile } from "@/lib/steam";
 import { getExternalOrigin, shouldUseSecureSessionCookie } from "@/lib/requestOrigin";
@@ -41,10 +45,13 @@ export async function GET(req: NextRequest) {
     return redirectNoStore(`${origin}/auth/error?reason=no_steam_id`);
   }
 
-  const current = await getSteamSession();
+  const [current, pending] = await Promise.all([getSteamSession(), readPendingOnboardingSettings()]);
+  const firstEntry = !current?.steamId;
   const sameUser = current?.steamId === steamId;
   const known = sameUser ? current : undefined;
-  const steamApiKey = known?.apiKey;
+  const steamApiKey = known?.apiKey ?? pending?.steamApiKey;
+  const rawgApiKey = known?.rawgApiKey ?? pending?.rawgApiKey;
+  const storeCc = known?.storeCc ?? pending?.storeCc;
   let displayName = known?.displayName;
   let avatar = known?.avatar;
 
@@ -73,12 +80,16 @@ export async function GET(req: NextRequest) {
     displayName,
     avatar,
     apiKey: steamApiKey,
-    rawgApiKey: known?.rawgApiKey,
+    rawgApiKey,
+    storeCc,
   });
+  await clearPendingOnboardingSettings();
   logDebug("auth.callback.success", {
     hasSteamId: true,
-    redirectCalendar: true,
+    firstEntry,
+    redirectCalendar: !firstEntry,
+    redirectOnboarding: firstEntry,
     cookieSecure: shouldUseSecureSessionCookie(req.headers),
   });
-  return redirectNoStore(`${origin}/calendar`);
+  return redirectNoStore(firstEntry ? `${origin}/?entry=1` : `${origin}/calendar`);
 }

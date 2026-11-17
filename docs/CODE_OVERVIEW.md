@@ -194,6 +194,12 @@ Dynamic wishlist total API:
 - вызывает `getWishlistTotalForSession(session, { refresh: true })`;
 - возвращает JSON от `lib/wishlist-total-cache.ts` с итоговой суммой/скидками.
 
+### `app/api/early-access/route.ts`
+Dynamic Early Access API:
+- читает query-параметры `refresh`, `full`, `pages` и legacy `k=...|refresh=1`;
+- если передан `appids`, вызывает `lookupEarlyAccessAppIds(...)` и возвращает matched Early Access appids после appdetails genre validation, если matched candidates укладываются в `EARLY_ACCESS_LOOKUP_VALIDATE_MAX`;
+- иначе вызывает `getEarlyAccessSessionResult(...)` для текущей Steam session и возвращает JSON `EarlyAccessSessionResult`.
+
 ## Auth routes
 
 ### `app/auth/callback/route.ts`
@@ -250,9 +256,11 @@ Server actions для приватного calendar feed:
 ### `app/actions/calendar-view.ts`
 Server action `setCalendarView`:
 - нормализует view через `parseView`;
-- сохраняет view cookie `VIEW_COOKIE` на год;
+- нормализует правую панель через `parseCalendarSide(String(formData.get("side") ?? ""))`;
+- сохраняет только view cookie `VIEW_COOKIE` на год;
 - если есть session — сохраняет `calendar_view` через `saveUserCalendarView(...)`;
-- редирект на `/calendar?view=...&month=...`.
+- side не сохраняется в cookie/user settings, а только возвращается в URL как state выбранной правой панели;
+- редирект на `/calendar?view=...&side=tbd|early-access&month=...`.
 
 ### `app/actions/settings.ts`
 Server action `saveSettings`:
@@ -273,8 +281,9 @@ Binary favicon приложения. Файл не описывается как
 - CSS variables для background/foreground, Geist font vars, UI scale (`--ui-scale: 1.25`), ширины shell-области календаря, карточек релизов, compact grid, TBD column width, layout header/footer/main heights и bottom offsets.
 - Media queries уменьшают `--ui-scale` на узких экранах и меняют размеры release cards.
 - Dark mode переключает `--background`/`--foreground` через `prefers-color-scheme: dark`.
-- Описывает layout-классы: `.app-shell`, `.calendar-grid-shell`, `.calendar-grid-min`, `.calendar-grid-rows`, `.release-date-list`, `.release-date-scroll`, `.release-scroll-indicator`, `.calendar-feed-with-tbd`, `.calendar-day-cell`, `.calendar-game-card`, `.compact-grid`, `.compact-game-card`, `.release-month-cards`, `.release-game-card`, `.wishlist-modal-cards`.
-- contains large `@media (min-width: 1024px)` block for `html.calendar-fit-viewport`, который включает "fit viewport" layout для `/calendar`, чтобы календарь, year-only, TBD и scrollable release list занимали оставшуюся высоту viewport без page scroll.
+- Описывает layout-классы: `.app-shell`, `.calendar-grid-shell`, `.calendar-grid-min`, `.calendar-grid-rows`, `.release-date-list`, `.release-date-scroll`, `.release-scroll-indicator`, `.calendar-feed-with-tbd`, `.calendar-side-panel`, `.calendar-side-tabs`, `.calendar-side-tabs > a`, `.calendar-side-section`, `.calendar-day-cell`, `.calendar-game-card`, `.compact-grid`, `.compact-game-card`, `.release-month-cards`, `.release-game-card`, `.wishlist-modal-cards`.
+- `.calendar-side-panel` оставляет aside column min-width; `.calendar-side-tabs` делает два таба боковой панели горизонтальными через `display: flex`, а `.calendar-side-tabs > a` занимает `50%` ширины с ellipsis-текстом.
+- contains large `@media (min-width: 1024px)` block for `html.calendar-fit-viewport`, который включает "fit viewport" layout для `/calendar`, чтобы календарь, year-only, side panel content и scrollable release list занимали оставшуюся высоту viewport без page scroll; aside column растягивается на всю высоту, а `.calendar-side-section` и `FitBlock` внутри panel получают `height: 100%`.
 
 ### `app/layout.tsx`
 Root layout App Router.
@@ -295,15 +304,18 @@ Home page `/`.
 Main calendar page `/calendar`, `dynamic = "force-dynamic"`.
 - Требует Steam session через `requireSteamSession()`; при отсутствии редиректит `/auth/login`.
 - Парсит `searchParams.month` в `{ year, month1 }`, default — текущий UTC месяц.
+- Парсит `searchParams.side` через `parseCalendarSide`; query canonical values `tbd`/`early-access`, алиасы `earlyAccess` и `ea`, default `tbd`.
 - Параллельно получает lang, translations и saved calendar view из cookie/user settings.
 - View выбирается как `parseView(searchParams.view) ?? cookieView`.
+- Side является только URL state правой панели `/calendar`; страница не сохраняет его в cookie/user settings.
 - Читает request headers и external origin для calendar feed URL.
 - Получает `calendarFeet token` через `getCalendarFeedToken(session.steamId)`.
-- Если feed token уже есть, показывает subscribe link к Google Calendar import URL (`?cid=feed:...`) или fallback `.ics`; внешние Google links помечаются `data-external="true"` для desktop interceptor; также показывает `details` management panel с readonly feed URL, `.ics` link и revoke form.
-- Если feed token нет, показывает form, вызывающий `createCalendarFeedLink`, чтобы создать token и вернуться на локальную calendar страницу с `openGoogle=1`.
+- Показывает `CalendarSubscriptionMenu`: кнопку `calendar.subscribe.menu`, которая через `CalendarSubscriptionModalTrigger` открывает общий `ModalShell` с существующим содержимым подписки.
+- Если feed token уже есть, subscription modal показывает subscribe link к Google Calendar import URL (`?cid=feed:...`) или fallback `.ics`, readonly feed URL, `.ics` link и revoke form; внешние Google links помечаются `data-external="true"` для desktop interceptor.
+- Если feed token нет, subscription modal показывает form, вызывающий `createCalendarFeedLink`, чтобы создать token и вернуться на локальную calendar страницу с `openGoogle=1`.
 - Показывает локальную Google-open панель при `openGoogle=1` и известном feed URL: кнопка возврата на `calendarBackPath` и явная external link `data-external="true"`.
 - Показывает flash сообщения `?feed=created` и `?feed=revoked`.
-- Всегда показывает `CalendarExportButton` для `/calendar/ics` и `CalendarViewToggle`.
+- Всегда показывает `CalendarExportButton` для `/calendar/ics` и `CalendarViewToggle` с текущим `side`.
 - Оборачивает `CalendarFeed` в `<Suspense fallback={<CalendarFeedSkeleton view={view} />}>`, чтобы тяжелая сборка upcoming games не блокировала rendering shell-страницы.
 
 ### `app/calendar/loading.tsx`
@@ -358,6 +370,12 @@ Client export link used for `/calendar/ics`.
 - Outside Tauri it behaves as a normal `<a download>` link.
 - Inside Tauri it fetches the local `/calendar/ics` response, checks `text/calendar`/`BEGIN:VCALENDAR`, then invokes `save_calendar_export` so WebView download behavior does not depend on HTML `download` support.
 
+### `components/CalendarSubscriptionMenu.tsx`
+Server component for calendar feed subscription controls.
+- Локализует subscription labels через `getT(steamId)`.
+- Готовит существующее subscription content: Google import link при наличии `googleUrl`, readonly feed URL при наличии token, `.ics` link, `CalendarExportButton`, revoke form или create feed form при отсутствии token.
+- Оборачивает content в `CalendarSubscriptionModalTrigger`, поэтому клик по кнопке открывает то же модальное окно, что и wishlist counter, но с подписным контентом.
+
 ### `components/WishlistPriceCounter.tsx`
 Client component header wishlist total counter.
 - Показывает label и formatted total из `initialTotal` или fetch `/api/wishlist-total?k=...`.
@@ -366,17 +384,38 @@ Client component header wishlist total counter.
 - Если есть items/discounts, counter рендерится как button и открывает `WishlistDiscountsModal`.
 - Если items нет, показывает readonly span `label: value`.
 
-### `components/WishlistDiscountsModal.tsx`
-Client modal wishlist games/discounts.
+### `components/ModalShell.tsx`
+Client shared modal shell used by wishlist and calendar subscription modals.
 - Рендерится через React portal в `document.body`.
 - Имеет accessible dialog behavior: focus trap via `FOCUSABLE_SELECTOR`, Escape close, close on backdrop click, restore previous focus.
+- Использует визуальную панель `wishlist-modal-panel fixed left-1/2 top-1/2 ...`, чтобы модалки выглядели одинаково.
+- Принимает `title`, `subtitle`, `closeLabel`, `contentClassName` и `children`, поэтому разные страницы могут показывать свой контент внутри одинакового окна.
+
+### `components/WishlistDiscountsModal.tsx`
+Client modal wishlist games/discounts.
+- Рендерит общий `ModalShell` с `titleId="wishlist-games-title"`.
 - Показывает total savings через `discount.savings` translation.
 - Преобразует `WishlistItemEntry` items из wishlist total API во временный `UpcomingGame` shape и рендерит каждый item как `GameCard variant="row"` с `disableNestedModal`, чтобы внутренний card modal не открывался поверх wishlist modal.
 
+### `components/CalendarSubscriptionModalTrigger.tsx`
+Client modal trigger for calendar subscription content.
+- Рендерит button `label={t("calendar.subscribe.menu")}` с `aria-haspopup="dialog"` и `aria-expanded`.
+- При клике открывает `ModalShell` и показывает серверно подготовленное subscription content passed as `children`.
+- Использует одинаковый визуальный modal window с wishlist counter modal, но свой контент и свой layout внутри контента.
+
+### `components/CalendarSidePanel.tsx`
+Server component правой aside-панели `/calendar`.
+- Получает `lang`, `view`, `side`, `year`, `month1`, `tbdGames`, `earlyAccessGames`.
+- Рендерит `<nav className="calendar-side-tabs">` с `aria-label={t("calendar.sidePanel.label")}` вместо generic group.
+- Делает горизонтальные ссылки-табы: `hrefFor("tbd")` и `hrefFor("earlyAccess")` формируют `/calendar?month=...&view=...&side=tbd|early-access`, поэтому month и calendar view сохраняются при выборе правой панели.
+- Подсвечивает active tab через `aria-current="page"` и синий active style; inactive tab использует обычный border style.
+- Рендерит `EarlyAccessSection`, если `side === "earlyAccess"`, иначе `TBDSection`.
+
 ### `components/CalendarFeed.tsx`
 Server component with `import "server-only"`, core renderer для `/calendar` feed content.
+- Принимает `session`, `lang`, `view`, `side`, `year`, `month1`.
 - Вызывает `collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY)`.
-- Логирует count games/warnings/wishlistPrivate.
+- Логирует `view`, `side`, `year`, `month1`, count games/warnings/wishlistPrivate.
 - Делит games на:
   - TBD: без exact `releaseDate` и без `releaseYear`;
   - year-only groups через `buildYearGroups(buildByYearMap(...))`;
@@ -386,14 +425,17 @@ Server component with `import "server-only"`, core renderer для `/calendar` f
 - Показывает warning panel для `result.warnings` и private wishlist status, включая template `wishlistPartial` с shown/total counts.
 - Для grid рендерит `CalendarGrid` с month grid, weekday names, navigation nodes `MonthSideNav` prev/next и `MonthTodayLink`.
 - Для list рендерит `ScrollableReleaseList` внутри `ReleaseDateList`.
-- Всегда рендерит `TBDSection` в aside column `calendar-feed-with-tbd`.
+- В query для month navigation добавляет `side: calendarSideQueryValue(side)`, чтобы навигация месяца не теряла выбранную правую панель.
+- Если `side === "earlyAccess"`, лениво загружает `getEarlyAccessSessionResult(session)` и превращает EA games в `UpcomingGame` shape с `sources: ["library"]`, enriched `headerImage`, `steamType`, `isFree`, `price`, `releaseDate`/`releaseYear` и `dateSource` from enriched Steam data, а fallback-ом `releaseDate: null` / `dateSource: "unknown"` когда details недоступны.
+- Рендерит aside column `calendar-feed-with-tbd` через `CalendarSidePanel` с `tbdGames` и `earlyAccessGames`; прямой `TBDSection` теперь выбирается внутри side panel по текущему `side`.
 
 ### `components/CalendarFeedSkeleton.tsx`
 Suspense fallback skeleton для `CalendarFeed`.
 - Использует локальный `SkeletonBlock` с pulse placeholder.
 - Для `view="grid"` показывает mock month nav и grid из weekday header plus 42 skeleton day cells.
 - Для `view="list"` показывает 3 mock month sections по 2 date rows по 2 card blocks.
-- Всегда показывает aside TBD skeleton через `compact-grid tbd-grid`.
+- Всегда показывает aside placeholder через `compact-grid tbd-grid`, потому что skeleton не знает финальный `side`; это generic loading-заполнение правой aside-панели.
+- Реальный aside после загрузки `CalendarFeed` использует `CalendarSidePanel` с tabs и выбранным разделом `TBDSection`/`EarlyAccessSection`.
 - `aria-hidden="true"`, потому что это декоративный loading state.
 
 ### `components/CalendarPageSkeleton.tsx`
@@ -405,7 +447,8 @@ Suspense fallback skeleton для всей calendar page.
 ### `components/CalendarViewToggle.tsx`
 Server component toggle grid/list.
 - Рендерит form с server action `setCalendarView`.
-- Передаёт hidden `month` value и submit button `name="view"` value `grid` или `list`.
+- Принимает `lang`, `view`, `side`, `year`, `month1`.
+- Передаёт hidden `month`, hidden `side` как `calendarSideQueryValue(side)` и submit button `name="view"` value `grid` или `list`, поэтому переключение grid/list сохраняет текущую правую панель.
 - Active/inactive styling через локальные class strings.
 
 ### `components/MonthNav.tsx`
@@ -440,9 +483,16 @@ Client component wrapper for scrollable release list.
 ### `components/TBDSection.tsx`
 Server component for games without known release date/year.
 - Empty state uses localized `calendar.tbd.empty`.
-- Calculates `rows = Math.ceil(games.length / 2)` for 2-column TBD compact grid.
-- Wraps cards in `FitBlock` with class `compact-grid tbd-grid fit`.
-- Renders compact `GameCard` variant.
+- Calculates `rows = Math.ceil(games.length / 2)` for 2-column compact grid.
+- Wraps content in `calendar-side-section` and `FitBlock`, using `compact-grid tbd-grid fit h-full` for side-panel fitted height.
+- Renders compact `GameCard` variant with key `tbd-${g.appid}`.
+
+### `components/EarlyAccessSection.tsx`
+Server component for owned Steam Early Access games in the calendar side panel.
+- Empty state uses localized `calendar.earlyAccess.empty`.
+- Title shows localized `calendar.earlyAccess.title` plus games count.
+- Mirrors `TBDSection` layout: 2-column compact grid, `FitBlock`, `compact-grid tbd-grid fit h-full` and `GameCard variant="compact"`.
+- Renders cards with key `early-access-${g.appid}`.
 
 ### `components/YearOnlySection.tsx`
 Server component for selected-year known-year-only games in grid view.
@@ -536,8 +586,31 @@ Client component game card/modal renderer.
 
 ### `lib/display-mode.ts`
 - Определение режима отображения календаря: `grid` или `list`.
-- Экспортирует `CalendarView`, `VIEW_COOKIE = "calendar_view"`, `parseView(raw)`, `getCalendarView(steamId?)`.
-- Приоритет: cookie `calendar_view` → сохранённая настройка пользователя → fallback `grid`.
+- Определение выбранной правой aside-панели: `tbd` или `earlyAccess`.
+- Экспортирует `CalendarView`, `CalendarSide`, `VIEW_COOKIE = "calendar_view"`, `parseView(raw)`, `parseCalendarSide(raw)`, `calendarSideQueryValue(side)`, `getCalendarView(steamId?)`.
+- Приоритет view: cookie `calendar_view` → сохранённая настройка пользователя → fallback `grid`.
+- Side не хранится в cookie/user settings: `parseCalendarSide` читает query-параметр, принимает `tbd`, `early-access`, `earlyAccess`, `ea` и fallback `tbd`.
+- `calendarSideQueryValue(side)` возвращает canonical URL value `tbd` или `early-access` для query, hidden form fields и side panel links.
+
+### `lib/early-access-core.ts`
+- Чистые константы, SQL, query helpers и парсеры Steam Early Access index без `server-only`.
+- Экспортирует `EARLY_ACCESS_TAG_ID = 493`, search URL/base, cache prefix/TTL, page/sort/delay/timeout env helpers, `EARLY_ACCESS_TABLE_SQL`, `EARLY_ACCESS_UPSERT_SQL`, `EARLY_ACCESS_LIST_SQL`, `EARLY_ACCESS_META_SQL`.
+- Типы: `EarlyAccessSearchPage`, `EarlyAccessCatalogStatus`, `EarlyAccessGame`, `EarlyAccessAppDetailsInput`, `EarlyAccessSessionResult`, `EarlyAccessLookupResult`.
+- `EarlyAccessGame` хранит минимум `appid`, `name`, `steamUrl`, `playtimeForever`, а также опциональные enriched-поля `headerImage`, `steamType`, `isFree`, `releaseDate`, `releaseYear` и `price`.
+- Функции: `applyEarlyAccessAppDetails`, `parseAppIdList`, `earlyAccessStoreCc`, `earlyAccessCatalogCacheKey`, `earlyAccessPageSize`, `earlyAccessMaxPages`, `earlyAccessLookupValidateMax`, `earlyAccessFullMaxPages`, `earlyAccessSearchDelayMs`, `earlyAccessTimeoutMs`, `earlyAccessSearchSort`, `earlyAccessSearchUrl`, `parseEarlyAccessSearchPage`, `shouldFetchNextEarlyAccessPage`, `createEarlyAccessCatalogStatus`, `hasEarlyAccessGenre`, `isEarlyAccessConfirmedAppDetails`, `isEarlyAccessConfirmedGame`, `normalizeEarlyAccessGame`.
+- Таблица `early_access_appids` хранит appid + store_cc + checked_at с индексами по store_cc и checked_at.
+
+### `lib/early-access.ts`
+- Server-side слой сборки Early Access каталога и intersection с owned Steam games.
+- Экспортирует `EarlyAccessFetchOptions`, `EarlyAccessLookupOptions`, `ensureEarlyAccessCatalog`, `getEarlyAccessSessionResult`, `lookupEarlyAccessAppIds`.
+- `ensureEarlyAccessCatalog` нормализует `storeCc`, читает DB meta, использует SQLite KV cache и `pendingCatalogStatuses` для dedup, fetchит Steam search pages tag `493` и сохраняет appids в `early_access_appids`.
+- Catalog TTL: normal full/partial index — 24h, partial index — 6h, negative/empty fetch — 1min; fetch failure сохраняет fallback DB status и warning `early_access_fetch_failed`.
+- `getEarlyAccessSessionResult` требует signed-in session и Steam API key, кэширует session result по `earlyaccess:owned:details:v3:<steamId>:<apiKeyHash>:<storeCc>` на 10min, затем фильтрует owned games через Early Access appid index и подтверждает membership по `steamGenres` / `Early Access` genre label.
+- После intersection Early Access games обогащаются через `getAppDetails` для первых до 80 appids с low priority и текущим `storeCc`; результат сохраняет `name`, `header_image`, `type`, `is_free`, `price_overview`, `steamGenres` и нормализованную release date/year через `applyEarlyAccessAppDetails`.
+- Если appdetails enrichment падает, session result остаётся с fallback `Steam App <appid>` names и warning `early_access_details_failed`.
+- Если enrichированная игра имеет confirmed `steamGenres` без `Early Access`, она удаляется из session result с warning `early_access_nonconfirmed_filtered`; игры без genre metadata остаются unknown/retained.
+- `lookupEarlyAccessAppIds` принимает список/строку appids, парсит positive integers, при необходимости гарантирует catalog, возвращает subset appids из `early_access_appids` и фильтрует confirmed non-EA appids через appdetails genres, если matched candidates <= `earlyAccessLookupValidateMax()` (default 100, env cap 200).
+- Если lookup validation пропущена из-за слишком большого matched list, возвращается `early_access_lookup_validation_skipped` warning; при фильтрации — `early_access_nonconfirmed_filtered`.
 
 ### `lib/i18n-core.ts`
 - Doменно-независимая переводческая и форматтирующая логика ru/en.
@@ -608,6 +681,7 @@ Client component game card/modal renderer.
 - Серверный слой реальных запросов к Steam Web API и Store-страницам.
 - Экспортирует `getPlayerSummaries`, `getSteamProfile`, `getOwnedGames`, `getAppDetails`, `extractSteamIdFromOpenId`.
 - Использует `steam-core.ts`, SQLite cache и дедупликацию; `getAppDetails` имеет семафор, pacing и три состояния: данные, подтверждённый негатив, transient miss.
+- `getAppDetails` запрашивает `filters=basic,genres,release_date,price_overview` и использует cache prefix `appdetails:v2:` для кэширования genre metadata.
 
 ### `lib/store-cc.ts`
 - Нормализация регионального Steam store code.
@@ -685,6 +759,18 @@ Client component game card/modal renderer.
 ### `tests/calendar-feed-link.test.ts`
 - Проверяет генерацию `/calendar/ics?token=...`, абсолютного feed URL и Google Calendar import URL.
 - Проверяет percent-encoding токена и feed URL.
+
+### `tests/calendar-side-panel.test.ts`
+- Проверяет, что `side` encoded в query, нормализуется через `parseCalendarSide`, canonical value возвращается через `calendarSideQueryValue` и сохраняется hidden input в `CalendarViewToggle`.
+- Проверяет, что `app/calendar/page.tsx` читает `side`, passит его в `CalendarViewToggle` и `CalendarFeed`, и не использует `calendarSideQueryValue` напрямую в page.
+- Проверяет, что `CalendarFeed` loads `getEarlyAccessSessionResult` только для `side === "earlyAccess"`, maps EA games в `UpcomingGame` shape и рендерит `CalendarSidePanel` с `tbdGames`/`earlyAccessGames`.
+- Проверяет side panel markup: horizontal tabs через `<nav>`, month/view preservation в `hrefFor`, `aria-current` без `role="group"`, and rendering `EarlyAccessSection`/`TBDSection` по выбранному side.
+- Проверяет, что `EarlyAccessSection` и `TBDSection` имеют одинаковый compact layout: `calendar-side-section`, `FitBlock`, `compact-grid tbd-grid fit h-full`, 2-column rows и `GameCard variant="compact"`.
+- Проверяет globals CSS для горизонтальных tabs и fit-viewport aside rules: tabs flex `50%`, aside panel grid `auto minmax(0,1fr)`, side section and `[data-fit-block]` height `100%`.
+- Проверяет наличие всех side panel/early access labels в ru/en dictionaries.
+
+### `tests/early-access.test.ts`
+- Проверяет pure core helpers Early Access: store cc normalization, regional cache key, page size clamp, safe sort sanitization, bounded max pages, bounded `earlyAccessLookupValidateMax`, `parseAppIdList`, Steam search page parsing, page-loop stop conditions, URL tag `493`/cc/start/count, appdetails genre confirmation helpers, `steamGenres` enrichment and partial catalog status warnings.
 
 ### `tests/google-calendar-desktop.test.ts`
 - Проверяет, что `createCalendarFeedLink` не редиректит напрямую в Google Calendar import URL, а возвращает пользователя на локальный `/calendar?feed=created&openGoogle=1`.

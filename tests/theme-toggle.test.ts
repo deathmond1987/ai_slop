@@ -19,12 +19,13 @@ test("header theme control is a single icon toggle posting to /theme", () => {
   assert.ok(toggleSource.includes('document.documentElement.classList.contains("dark")'));
 });
 
-test("settings expose explicit theme options for light dark and system", () => {
+test("settings expose explicit theme options for light, experimental, dark and system", () => {
   assert.ok(settingsSource.includes('action="/theme"'));
   assert.ok(settingsSource.includes('method="post"'));
   assert.ok(settingsSource.includes('name="theme"'));
   assert.ok(settingsSource.includes('type="radio"'));
   assert.ok(settingsSource.includes('value: "light" as const'));
+  assert.ok(settingsSource.includes('value: "lightExperimental" as const'));
   assert.ok(settingsSource.includes('value: "dark" as const'));
   assert.ok(settingsSource.includes('value: "system" as const'));
   assert.ok(settingsSource.includes("defaultChecked={theme === option.value}"));
@@ -36,5 +37,9 @@ test("theme translation keys exist in both dictionaries", () => {
     assert.ok(dict["settings.theme.label"]);
     assert.ok(dict["settings.theme.help"]);
     assert.ok(dict["settings.theme.save"]);
+    assert.ok(dict["theme.light"]);
+    assert.ok(dict["theme.lightExperimental"]);
+    assert.ok(dict["theme.dark"]);
+    assert.ok(dict["theme.system"]);
   }
 });

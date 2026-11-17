@@ -45,6 +45,7 @@ async function getLegacySteamSession(
       apiKey: legacy.apiKey,
       rawgApiKey: legacy.rawgApiKey,
       storeCc: legacy.storeCc,
+      experimentalEarlyAccess: legacy.experimentalEarlyAccess,
     };
   } catch (error) {
     logDebug("session.legacy.read_failed", {
@@ -82,6 +83,7 @@ export async function requireSteamSession(): Promise<IdentifiedSession | null> {
     apiKey: session.apiKey,
     rawgApiKey: session.rawgApiKey,
     storeCc: session.storeCc,
+    experimentalEarlyAccess: session.experimentalEarlyAccess,
   };
 }
 
@@ -103,6 +105,9 @@ export async function saveSteamSession(profile: SteamSession): Promise<void> {
     if (profile.apiKey) updates.steamApiKey = profile.apiKey;
     if (profile.rawgApiKey) updates.rawgApiKey = profile.rawgApiKey;
     if (profile.storeCc) updates.storeCc = profile.storeCc;
+    if (profile.experimentalEarlyAccess !== undefined) {
+      updates.experimentalEarlyAccess = Boolean(profile.experimentalEarlyAccess);
+    }
 
     if (Object.keys(updates).length > 0) {
       await saveUserSettings(profile.steamId, updates);
@@ -131,6 +136,9 @@ export async function saveSteamSession(profile: SteamSession): Promise<void> {
   if (profile.apiKey !== undefined) legacy.apiKey = profile.apiKey;
   if (profile.rawgApiKey !== undefined) legacy.rawgApiKey = profile.rawgApiKey;
   if (profile.storeCc !== undefined) legacy.storeCc = normalizeSteamStoreCc(profile.storeCc);
+  if (profile.experimentalEarlyAccess !== undefined) {
+    legacy.experimentalEarlyAccess = Boolean(profile.experimentalEarlyAccess);
+  }
   await legacy.save();
 }
 
@@ -153,6 +161,9 @@ export async function updateSessionSettings(
     if ("steamApiKey" in updates) legacy.apiKey = updates.steamApiKey ?? undefined;
     if ("rawgApiKey" in updates) legacy.rawgApiKey = updates.rawgApiKey ?? undefined;
     if ("storeCc" in updates) legacy.storeCc = normalizeSteamStoreCc(updates.storeCc);
+    if ("experimentalEarlyAccess" in updates) {
+      legacy.experimentalEarlyAccess = Boolean(updates.experimentalEarlyAccess);
+    }
 
     await legacy.save();
     return true;

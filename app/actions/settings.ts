@@ -14,9 +14,12 @@ export async function saveSettings(formData: FormData) {
   const rawgApiKey = String(formData.get("rawgApiKey") ?? "").trim();
   const storeCc = normalizeSteamStoreCc(String(formData.get("storeCc") ?? ""));
   const remove = String(formData.get("remove") ?? "");
+  const experimentalEarlyAccess =
+    String(formData.get("experimentalEarlyAccess") ?? "").trim().toLowerCase() === "true";
   const hasSteamApiKey = formData.has("steamApiKey");
   const hasRawgApiKey = formData.has("rawgApiKey");
   const hasStoreCc = formData.has("storeCc");
+  const hasExperimentalEarlyAccess = formData.has("experimentalEarlyAccess");
 
   const updates: UserSettingsUpdate = {};
 
@@ -30,6 +33,7 @@ export async function saveSettings(formData: FormData) {
     if (steamApiKey) updates.steamApiKey = steamApiKey;
     if (rawgApiKey) updates.rawgApiKey = rawgApiKey;
     if (storeCc) updates.storeCc = storeCc;
+    if (hasExperimentalEarlyAccess) updates.experimentalEarlyAccess = experimentalEarlyAccess;
   }
 
   if (Object.keys(updates).length > 0) {
@@ -38,6 +42,9 @@ export async function saveSettings(formData: FormData) {
       hasSteamKeyUpdate: "steamApiKey" in updates,
       hasRawgKeyUpdate: "rawgApiKey" in updates,
       hasStoreCcUpdate: "storeCc" in updates,
+      hasExperimentalEarlyAccessUpdate: "experimentalEarlyAccess" in updates,
+      experimentalEarlyAccessValue:
+        "experimentalEarlyAccess" in updates ? updates.experimentalEarlyAccess : undefined,
     });
     const ok = await updateSessionSettings(session, updates);
     logDebug("settings.save.result", { ok });
@@ -80,6 +87,8 @@ export async function saveSettings(formData: FormData) {
     savedTarget = "steam-save";
   } else if (hasRawgApiKey) {
     savedTarget = "rawg-save";
+  } else if (hasExperimentalEarlyAccess) {
+    savedTarget = "early-access-experimental-save";
   } else if (hasStoreCc) {
     savedTarget = "store-save";
   }

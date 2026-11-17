@@ -15,6 +15,7 @@ const SETTINGS_SAVED_TARGETS = new Set<string>([
   "rawg-remove",
   "store-save",
   "store-remove",
+  "early-access-experimental-save",
 ]);
 
 function getSettingsSavedTarget(
@@ -106,6 +107,7 @@ export default async function SettingsPage({
               {(
                 [
                   { value: "light" as const, label: t("theme.light") },
+                  { value: "lightExperimental" as const, label: t("theme.lightExperimental") },
                   { value: "dark" as const, label: t("theme.dark") },
                   { value: "system" as const, label: t("theme.system") },
                 ] satisfies { value: ThemePreference; label: string }[]
@@ -277,6 +279,39 @@ export default async function SettingsPage({
               </button>
             </form>
           )}
+        </div>
+
+        <div className="settings-card">
+          <h2>{t("settings.experimentalEarlyAccess.label")}</h2>
+          <span className="settings-status">
+            {t(
+              session.experimentalEarlyAccess
+                ? "settings.experimentalEarlyAccess.enabled"
+                : "settings.experimentalEarlyAccess.disabled"
+            )}
+          </span>
+          <p>{t("settings.experimentalEarlyAccess.help")}</p>
+          <form action={saveSettings}>
+            <label>
+              <input
+                id="experimentalEarlyAccess"
+                name="experimentalEarlyAccess"
+                type="checkbox"
+                value="true"
+                defaultChecked={session.experimentalEarlyAccess === true}
+              />
+              {t("settings.experimentalEarlyAccess.label")}
+            </label>
+            <input type="hidden" name="experimentalEarlyAccess" value="false" />
+            {savedTarget === "early-access-experimental-save" && (
+              <span className="settings-applied settings-applied-save">
+                {t("settings.applied")}
+              </span>
+            )}
+            <button type="submit" className="settings-save-btn">
+              {t("settings.experimentalEarlyAccess.save")}
+            </button>
+          </form>
         </div>
       </div>
     </section>

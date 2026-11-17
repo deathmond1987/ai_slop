@@ -12,7 +12,7 @@ import { DesktopExternalLinks } from "@/components/DesktopExternalLinks";
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin", "cyrillic"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin", "cyrillic"] });
 
-const themeScript = `(function(){try{var d=document.documentElement,cookie=document.cookie.match(/(?:^|; )ui_theme=([^;]*)/),v=cookie?decodeURIComponent(cookie[1]):"";d.classList.remove("light","dark","theme-system");if(v==="dark")d.classList.add("dark");else if(v==="light")d.classList.add("light");else{d.classList.add("theme-system");if(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)d.classList.add("dark")}}catch(e){}})()`;
+const themeScript = `(function(){try{var d=document.documentElement,cookie=document.cookie.match(/(?:^|; )ui_theme=([^;]*)/),v=cookie?decodeURIComponent(cookie[1]):"";d.classList.remove("light","dark","theme-system","light-experimental");if(v==="dark")d.classList.add("dark");else if(v==="light")d.classList.add("light");else if(v==="lightExperimental")d.classList.add("light","light-experimental");else{d.classList.add("theme-system");if(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)d.classList.add("dark")}}catch(e){}})()`;
 
 export async function generateMetadata(): Promise<Metadata> {
   const session = await getSteamSession();

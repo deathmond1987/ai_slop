@@ -4,11 +4,18 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { logDebug } from "@/lib/debug";
 import { saveUserCalendarView } from "@/lib/auth-store";
-import { parseView, VIEW_COOKIE, type CalendarView } from "@/lib/display-mode";
+import {
+  calendarSideQueryValue,
+  parseCalendarSide,
+  parseView,
+  VIEW_COOKIE,
+  type CalendarView,
+} from "@/lib/display-mode";
 import { requireSteamSession } from "@/lib/session";
 
 export async function setCalendarView(formData: FormData) {
   const view: CalendarView = parseView(String(formData.get("view") ?? "")) ?? "grid";
+  const side = parseCalendarSide(String(formData.get("side") ?? ""));
   const month = String(formData.get("month") ?? "");
   const monthOk = /^\d{4}-\d{2}$/.test(month);
 
@@ -31,7 +38,7 @@ export async function setCalendarView(formData: FormData) {
     await saveUserCalendarView(session.steamId, view);
   }
 
-  const params = new URLSearchParams({ view });
+  const params = new URLSearchParams({ view, side: calendarSideQueryValue(side) });
   if (monthOk) params.set("month", month);
   redirect(`/calendar?${params.toString()}`);
 }

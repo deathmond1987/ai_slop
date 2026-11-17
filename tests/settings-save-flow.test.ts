@@ -26,6 +26,13 @@ const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url
 const actionSource = readFileSync(new URL("../app/actions/settings.ts", import.meta.url), "utf8");
 const langRouteSource = readFileSync(new URL("../app/auth/lang/route.ts", import.meta.url), "utf8");
 const themeRouteSource = readFileSync(new URL("../app/theme/route.ts", import.meta.url), "utf8");
+const { cacheGet, cacheSet } = await import("../lib/cache-store.ts");
+const { getStatementRow, runStatement } = await import("../lib/sqlite.ts");
+const {
+  EARLY_ACCESS_EXPERIMENTAL_LIST_SQL,
+  EARLY_ACCESS_EXPERIMENTAL_UPSERT_SQL,
+  EARLY_ACCESS_OWNED_CACHE_PREFIX,
+} = await import("../lib/early-access-core.ts");
 
 test("settings page keeps each saved setting independent from remove controls", () => {
   const settingNames = ["steamApiKey", "rawgApiKey", "storeCc"];
@@ -179,6 +186,92 @@ test("sequential settings saves preserve API keys and region", async () => {
   assert.equal(session?.apiKey, undefined);
   assert.equal(session?.rawgApiKey, "rawg-key-1");
   assert.equal(session?.storeCc, "de");
+
+  assert.equal(await authStore.destroyDbSession(token!), true);
+});
+
+test("experimental early access settings form is independent from remove controls", () => {
+  const formBlocks = [...pageSource.matchAll(/<form action=\{saveSettings\}[\s\S]*?<\/form>/g)].map(
+    (match) => match[0]
+  );
+  const experimentalFormBlocks = formBlocks.filter((block) =>
+    block.includes('name="experimentalEarlyAccess"')
+  );
+
+  assert.equal(experimentalFormBlocks.length, 1);
+  assert.ok(experimentalFormBlocks[0].includes('type="submit"'));
+  assert.ok(experimentalFormBlocks[0].includes('t("settings.experimentalEarlyAccess.save")'));
+  assert.ok(!experimentalFormBlocks[0].includes('name="remove"'));
+
+  for (const otherSetting of ["steamApiKey", "rawgApiKey", "storeCc"]) {
+    assert.ok(!experimentalFormBlocks[0].includes(`name="${otherSetting}"`));
+  }
+
+  assert.ok(pageSource.includes('savedTarget === "early-access-experimental-save"'));
+  assert.ok(actionSource.includes('savedTarget = "early-access-experimental-save"'));
+});
+
+test("experimental early access i18n strings exist for both languages", () => {
+  const dictionaries = ["ru", "en"].map((lang) =>
+    JSON.parse(readFileSync(new URL(`../i18n/${lang}.json`, import.meta.url), "utf8")) as Record<
+      string,
+      unknown
+    >
+  );
+  const requiredKeys = [
+    "settings.experimentalEarlyAccess.label",
+    "settings.experimentalEarlyAccess.help",
+    "settings.experimentalEarlyAccess.enabled",
+    "settings.experimentalEarlyAccess.disabled",
+    "settings.experimentalEarlyAccess.save",
+  ];
+
+  for (const dictionary of dictionaries) {
+    for (const key of requiredKeys) {
+      assert.ok(typeof dictionary[key] === "string" && dictionary[key]);
+    }
+  }
+});
+
+test("experimental early access setting persists, deletes rows, and invalidates EA owned cache", async () => {
+  const token = await authStore.createDbSession({ steamId });
+  assert.ok(token);
+
+  assert.equal(await authStore.saveUserSettings(steamId, { experimentalEarlyAccess: true }), true);
+  let session = await authStore.getSteamSessionDataFromToken(token!);
+  assert.equal(session?.experimentalEarlyAccess, true);
+
+  const storeCc = "us";
+  const appid = 12345678;
+  assert.equal(
+    await runStatement(
+      EARLY_ACCESS_EXPERIMENTAL_UPSERT_SQL,
+      steamId,
+      storeCc,
+      appid,
+      Date.now()
+    ),
+    true
+  );
+
+  const before = (await getStatementRow(
+    EARLY_ACCESS_EXPERIMENTAL_LIST_SQL,
+    steamId,
+    storeCc
+  )) as { appid?: number } | undefined;
+  assert.equal(before?.appid, appid);
+
+  const cacheKey = `${EARLY_ACCESS_OWNED_CACHE_PREFIX}${steamId}:experimental-cache-test`;
+  await cacheSet(cacheKey, "early-access-cache", 1000);
+  assert.equal(await cacheGet(cacheKey), "early-access-cache");
+
+  assert.equal(await authStore.saveUserSettings(steamId, { experimentalEarlyAccess: false }), true);
+  session = await authStore.getSteamSessionDataFromToken(token!);
+  assert.equal(session?.experimentalEarlyAccess, false);
+
+  const after = await getStatementRow(EARLY_ACCESS_EXPERIMENTAL_LIST_SQL, steamId, storeCc);
+  assert.equal(after, undefined);
+  assert.equal(await cacheGet(cacheKey), undefined);
 
   assert.equal(await authStore.destroyDbSession(token!), true);
 });

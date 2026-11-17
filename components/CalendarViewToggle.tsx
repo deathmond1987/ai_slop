@@ -1,16 +1,18 @@
 import { setCalendarView } from "@/app/actions/calendar-view";
 import { tFor } from "@/lib/i18n";
-import type { CalendarView } from "@/lib/display-mode";
+import { calendarSideQueryValue, type CalendarSide, type CalendarView } from "@/lib/display-mode";
 import type { Lang } from "@/lib/types";
 
 export function CalendarViewToggle({
   lang,
   view,
+  side,
   year,
   month1,
 }: {
   lang: Lang;
   view: CalendarView;
+  side: CalendarSide;
   year: number;
   month1: number;
 }) {
@@ -24,8 +26,9 @@ export function CalendarViewToggle({
   return (
     <form action={setCalendarView} className="flex flex-wrap gap-1">
       <input type="hidden" name="month" value={monthValue} />
+      <input type="hidden" name="side" value={calendarSideQueryValue(side)} />
       <button type="submit" name="view" value="grid" className={view === "grid" ? active : inactive}>
-        {t("calendar.view.grid")}
+        {t("calendar.title")}
       </button>
       <button type="submit" name="view" value="list" className={view === "list" ? active : inactive}>
         {t("calendar.view.list")}

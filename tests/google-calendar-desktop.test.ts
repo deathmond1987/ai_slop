@@ -14,6 +14,18 @@ const subscriptionMenuSource = readFileSync(
   new URL("../components/CalendarSubscriptionMenu.tsx", import.meta.url),
   "utf8",
 );
+const subscriptionTriggerSource = readFileSync(
+  new URL("../components/CalendarSubscriptionModalTrigger.tsx", import.meta.url),
+  "utf8",
+);
+const modalShellSource = readFileSync(
+  new URL("../components/ModalShell.tsx", import.meta.url),
+  "utf8",
+);
+const wishlistModalSource = readFileSync(
+  new URL("../components/WishlistDiscountsModal.tsx", import.meta.url),
+  "utf8",
+);
 const layoutSource = readFileSync(
   new URL("../app/layout.tsx", import.meta.url),
   "utf8",
@@ -43,13 +55,33 @@ test("calendar feed creation redirects to a local calendar page instead of Googl
   assert.ok(actionSource.includes('redirectFeedLink("created", formData, true)'));
 });
 
-test("calendar page renders local Google-open panel with app back link", () => {
+test("subscription feedback renders inside the subscription modal, not on the calendar page", () => {
   assert.ok(pageSource.includes('const openGoogle = openGoogleParam === "1"'));
-  assert.ok(pageSource.includes("calendarBackPath"));
-  assert.ok(pageSource.includes('href={calendarBackPath}'));
-  assert.ok(pageSource.includes('t("calendar.google.back")'));
-  assert.ok(pageSource.includes('t("calendar.google.open")'));
-  assert.ok(pageSource.includes('data-external="true"'));
+  assert.ok(pageSource.includes("feedStatus={feedStatus}"));
+  assert.ok(pageSource.includes("openGoogle={openGoogle}"));
+  assert.ok(!pageSource.includes('t("calendar.feed.flash.created")'));
+  assert.ok(!pageSource.includes('t("calendar.feed.flash.revoked")'));
+  assert.ok(!pageSource.includes('t("calendar.google.open")'));
+  assert.ok(!pageSource.includes('t("calendar.google.back")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.feed.flash.created")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.feed.flash.revoked")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.google.help")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.google.open")'));
+  assert.ok(subscriptionMenuSource.includes('t("calendar.google.back")'));
+  assert.ok(subscriptionMenuSource.includes("href={calendarBackPath}"));
+  assert.ok(subscriptionMenuSource.includes('data-external="true"'));
+  assert.ok(
+    subscriptionMenuSource.includes(
+      'initialOpen={feedStatus === "created" || feedStatus === "revoked"}',
+    ),
+  );
+});
+
+test("subscription modal stays open after create and revoke submit", () => {
+  assert.ok(subscriptionTriggerSource.includes("useState(initialOpen)"));
+  assert.ok(subscriptionMenuSource.includes('key={feedStatus ?? "subscription"}'));
+  assert.ok(!subscriptionTriggerSource.includes("useEffect"));
+  assert.ok(subscriptionTriggerSource.includes("router.replace(clearHref"));
 });
 
 test("layout mounts desktop external link interceptor", () => {
@@ -87,6 +119,17 @@ test("calendar page uses a unified subscription menu", () => {
   assert.ok(subscriptionMenuSource.includes('action={createCalendarFeedLink}'));
   assert.ok(subscriptionMenuSource.includes('action={revokeCalendarFeedLink}'));
   assert.ok(subscriptionMenuSource.includes('data-external="true"'));
+});
+
+test("calendar subscription button opens the wishlist-style modal shell", () => {
+  assert.ok(subscriptionMenuSource.includes("<CalendarSubscriptionModalTrigger"));
+  assert.ok(subscriptionMenuSource.includes('closeLabel={t("modal.close")}'));
+  assert.ok(!subscriptionMenuSource.includes("<details"));
+  assert.ok(subscriptionTriggerSource.includes("<ModalShell"));
+  assert.ok(subscriptionTriggerSource.includes('aria-haspopup="dialog"'));
+  assert.ok(wishlistModalSource.includes("<ModalShell"));
+  assert.ok(modalShellSource.includes('wishlist-modal-panel fixed left-1/2 top-1/2'));
+  assert.ok(modalShellSource.includes("aria-modal=\"true\""));
 });
 
 test("google calendar desktop translation keys exist in both dictionaries", () => {

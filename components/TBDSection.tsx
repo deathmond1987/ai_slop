@@ -13,15 +13,13 @@ export function TBDSection({ lang, games }: { lang: Lang; games: UpcomingGame[] 
     );
   }
 
-  const rows = Math.ceil(games.length / 2);
+  const singleColumn = games.length <= 8;
+  const rows = singleColumn ? games.length : Math.ceil(games.length / 2);
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <h2 className="text-scale-11 leading-tight font-semibold truncate">
-        {t("calendar.tbd.title")} ({games.length})
-      </h2>
+    <div className="calendar-side-section flex min-w-0 flex-col gap-1">
       <FitBlock rows={rows} className="min-w-0">
-        <div className="compact-grid tbd-grid fit h-full">
+        <div className={`compact-grid tbd-grid fit h-full${singleColumn ? " single-column" : ""}`}>
           {games.map((g) => (
             <GameCard key={`tbd-${g.appid}`} game={g} lang={lang} variant="compact" />
           ))}

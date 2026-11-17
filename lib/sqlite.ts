@@ -3,6 +3,11 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { logDebug, sanitizeDebugError } from "./debug";
+import {
+  EARLY_ACCESS_CATALOG_STATE_TABLE_SQL,
+  EARLY_ACCESS_EXPERIMENTAL_TABLE_SQL,
+  EARLY_ACCESS_TABLE_SQL,
+} from "./early-access-core.ts";
 
 const DB_FILE =
   process.env.DB_SQLITE_PATH ||
@@ -39,6 +44,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   store_cc TEXT,
   calendar_view TEXT,
   lang TEXT,
+  experimental_early_access INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL
 );
 
@@ -60,6 +66,10 @@ CREATE TABLE IF NOT EXISTS calendar_feeds (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS calendar_feeds_steam_id_idx ON calendar_feeds (steam_id);
+
+${EARLY_ACCESS_TABLE_SQL}
+${EARLY_ACCESS_EXPERIMENTAL_TABLE_SQL}
+${EARLY_ACCESS_CATALOG_STATE_TABLE_SQL}
 `;
 
 let dbPromise: Promise<DatabaseSync | undefined> | undefined;
@@ -74,6 +84,11 @@ function migrateUserSettings(db: DatabaseSync): void {
   const columns = db.prepare("PRAGMA table_info(user_settings)").all() as ColumnInfoRow[];
   if (!columns.some((column) => column.name === "store_cc")) {
     db.exec("ALTER TABLE user_settings ADD COLUMN store_cc TEXT");
+  }
+  if (!columns.some((column) => column.name === "experimental_early_access")) {
+    db.exec(
+      "ALTER TABLE user_settings ADD COLUMN experimental_early_access INTEGER NOT NULL DEFAULT 0"
+    );
   }
 }
 

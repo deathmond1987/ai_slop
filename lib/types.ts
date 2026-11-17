@@ -46,6 +46,7 @@ export interface SteamSession {
   apiKey?: string;
   rawgApiKey?: string;
   storeCc?: string;
+  experimentalEarlyAccess?: boolean;
 }
 
 export type IdentifiedSession = SteamSession & { steamId: string };

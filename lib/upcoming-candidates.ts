@@ -39,7 +39,7 @@ export interface AppDetailsLike {
   developer?: string[];
   publisher?: string[];
   header_image?: string;
-  genres?: { type: string; description: string }[];
+  genres?: { id?: string; type?: string; description: string }[];
   release_date?: { date: string; coming_soon: boolean };
   fullgame?: { appid: string | number; name?: string };
   price_overview?: SteamPriceOverview;

@@ -16,6 +16,10 @@ import {
   STEAM_PROFILE_CACHE_PREFIX,
 } from "./steam-core";
 import { WISHLIST_CACHE_PREFIX } from "./wishlist-cache-core";
+import {
+  EARLY_ACCESS_EXPERIMENTAL_DELETE_SQL,
+  EARLY_ACCESS_OWNED_CACHE_PREFIX,
+} from "./early-access-core.ts";
 import { getStatementRow, runStatement } from "./sqlite";
 import { normalizeSteamStoreCc } from "./store-cc";
 import type { Lang } from "./types";
@@ -46,14 +50,15 @@ const INSERT_USER_SETTINGS_SQL = `INSERT INTO user_settings (steam_id, updated_a
  ON CONFLICT(steam_id) DO NOTHING`;
 
 const UPDATE_USER_SETTINGS_SQL = `UPDATE user_settings
- SET steam_api_key_cipher = ?, rawg_api_key_cipher = ?, store_cc = ?, updated_at = ?
- WHERE steam_id = ?`;
+  SET steam_api_key_cipher = ?, rawg_api_key_cipher = ?, store_cc = ?, experimental_early_access = ?, updated_at = ?
+  WHERE steam_id = ?`;
 
 const GET_USER_SQL = `SELECT u.steam_id, u.display_name, u.avatar,
- us.steam_api_key_cipher, us.rawg_api_key_cipher, us.store_cc, us.calendar_view, us.lang
- FROM users u
- LEFT JOIN user_settings us ON us.steam_id = u.steam_id
- WHERE u.steam_id = ?`;
+  us.steam_api_key_cipher, us.rawg_api_key_cipher, us.store_cc, us.calendar_view, us.lang,
+  us.experimental_early_access
+  FROM users u
+  LEFT JOIN user_settings us ON us.steam_id = u.steam_id
+  WHERE u.steam_id = ?`;
 
 const INSERT_SESSION_SQL = `INSERT INTO sessions (token_hash, steam_id, expires_at, created_at, last_seen_at)
  VALUES (?, ?, ?, ?, ?)`;
@@ -83,6 +88,7 @@ export interface UserSettingsUpdate {
   steamApiKey?: string | null;
   rawgApiKey?: string | null;
   storeCc?: string | null;
+  experimentalEarlyAccess?: boolean;
 }
 
 export interface UserPreferences {
@@ -99,6 +105,7 @@ interface UserRow {
   store_cc?: string | null;
   calendar_view?: string | null;
   lang?: string | null;
+  experimental_early_access?: number | boolean | null;
 }
 
 interface SessionTokenRow {
@@ -391,12 +398,26 @@ async function getUserRow(steamId: string): Promise<UserRow | undefined> {
   return getStatementRow<UserRow>(GET_USER_SQL, steamId);
 }
 
+function isExperimentalEarlyAccessEnabled(value: unknown): boolean {
+  return value === 1 || value === true;
+}
+
 async function readDecryptedSettings(
   row: UserRow
-): Promise<{ apiKey?: string; rawgApiKey?: string; storeCc?: string }> {
+): Promise<{
+  apiKey?: string;
+  rawgApiKey?: string;
+  storeCc?: string;
+  experimentalEarlyAccess: boolean;
+}> {
   const apiKey = await decryptString(row.steam_api_key_cipher);
   const rawgApiKey = await decryptString(row.rawg_api_key_cipher);
-  return { apiKey, rawgApiKey, storeCc: normalizeSteamStoreCc(row.store_cc) };
+  return {
+    apiKey,
+    rawgApiKey,
+    storeCc: normalizeSteamStoreCc(row.store_cc),
+    experimentalEarlyAccess: isExperimentalEarlyAccessEnabled(row.experimental_early_access),
+  };
 }
 
 async function invalidateUserSteamCaches(steamId: string): Promise<void> {
@@ -405,6 +426,7 @@ async function invalidateUserSteamCaches(steamId: string): Promise<void> {
     deleteCacheByExactOrPrefix(`${OWNED_CACHE_PREFIX}${steamId}`),
     deleteCacheByExactOrPrefix(`${STEAM_PROFILE_CACHE_PREFIX}${steamId}`),
     deleteCacheByExactOrPrefix(`${WISHLIST_CACHE_PREFIX}${steamId}`),
+    deleteCacheByExactOrPrefix(`${EARLY_ACCESS_OWNED_CACHE_PREFIX}${steamId}`),
   ]);
 }
 
@@ -433,6 +455,11 @@ export async function saveUserSettings(
       ? normalizeSteamStoreCc(updates.storeCc)
       : normalizeSteamStoreCc(currentRow?.store_cc);
 
+  const experimentalEarlyAccess =
+    "experimentalEarlyAccess" in updates
+      ? Boolean(updates.experimentalEarlyAccess)
+      : isExperimentalEarlyAccessEnabled(currentRow?.experimental_early_access);
+
   const ok = await ensureUserSettingsRow(steamId);
   if (!ok) return false;
 
@@ -441,9 +468,17 @@ export async function saveUserSettings(
     steamApiKeyCipher,
     rawgApiKeyCipher,
     storeCc ?? null,
+    experimentalEarlyAccess ? 1 : 0,
     Date.now(),
     steamId
   );
+
+  if (
+    "experimentalEarlyAccess" in updates &&
+    updates.experimentalEarlyAccess === false
+  ) {
+    await runStatement(EARLY_ACCESS_EXPERIMENTAL_DELETE_SQL, steamId);
+  }
 
   if (saved) await invalidateUserSteamCaches(steamId);
   return saved;
@@ -514,7 +549,15 @@ export async function getSteamIdFromCalendarFeedToken(token: string): Promise<st
 
 export async function getSteamSessionData(
   steamId: string
-): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string; storeCc?: string } | undefined> {
+): Promise<
+  (ProfileInput & {
+    apiKey?: string;
+    rawgApiKey?: string;
+    storeCc?: string;
+    experimentalEarlyAccess?: boolean;
+  })
+  | undefined
+> {
   const row = await getUserRow(steamId);
   if (!row?.steam_id) return undefined;
 
@@ -526,6 +569,7 @@ export async function getSteamSessionData(
     apiKey: settings.apiKey,
     rawgApiKey: settings.rawgApiKey,
     storeCc: settings.storeCc,
+    experimentalEarlyAccess: settings.experimentalEarlyAccess,
   };
 }
 
@@ -553,7 +597,15 @@ export async function createDbSession(
 
 export async function getSteamSessionDataFromToken(
   token: string
-): Promise<ProfileInput & { apiKey?: string; rawgApiKey?: string; storeCc?: string } | undefined> {
+): Promise<
+  (ProfileInput & {
+    apiKey?: string;
+    rawgApiKey?: string;
+    storeCc?: string;
+    experimentalEarlyAccess?: boolean;
+  })
+  | undefined
+> {
   const tokenHash = hashToken(token);
   const row = await getStatementRow<SessionTokenRow>(SELECT_SESSION_SQL, tokenHash, Date.now());
   if (!row?.steam_id) return undefined;

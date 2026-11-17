@@ -11,6 +11,7 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    ".tmp-validation/**",
     "next-env.d.ts",
     "desktop/.build/**",
     "desktop/src-tauri/target/**",

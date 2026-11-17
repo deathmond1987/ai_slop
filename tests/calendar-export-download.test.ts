@@ -29,9 +29,12 @@ const exportRsSource = readFileSync(
   "utf8",
 );
 
-test("calendar ics route returns attachment download disposition", () => {
-  assert.ok(icsRouteSource.includes('content-disposition": "attachment; filename=steam-calendar.ics"'));
-  assert.ok(!icsRouteSource.includes('content-disposition": "inline; filename=steam-calendar.ics"'));
+test("calendar ics route defaults to attachment and supports inline opening", () => {
+  assert.ok(icsRouteSource.includes('searchParams.get("open") === "1"'));
+  assert.ok(icsRouteSource.includes('openInline'));
+  assert.ok(icsRouteSource.includes('inline; filename=steam-calendar.ics'));
+  assert.ok(icsRouteSource.includes('attachment; filename=steam-calendar.ics'));
+  assert.ok(!icsRouteSource.includes('"content-disposition": "inline;'));
 });
 
 test("calendar export button saves ICS through Tauri when available", () => {
@@ -47,6 +50,12 @@ test("calendar subscription menu uses the Tauri-aware export button", () => {
   assert.ok(subscriptionMenuSource.includes('import { CalendarExportButton } from "@/components/CalendarExportButton"'));
   assert.ok(subscriptionMenuSource.includes("<CalendarExportButton"));
   assert.ok(subscriptionMenuSource.includes('label={t("calendar.export.ics")}'));
+});
+
+test("calendar subscription menu opens subscription ICS inline", () => {
+  assert.ok(subscriptionMenuSource.includes("const subscriptionOpenPath = feedPath ? `${feedPath}&open=1` : undefined;"));
+  assert.ok(subscriptionMenuSource.includes("href={subscriptionOpenPath}"));
+  assert.ok(!subscriptionMenuSource.includes("download"));
 });
 
 test("sidecar remote WebView can invoke core commands for desktop export", () => {

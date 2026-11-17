@@ -5,6 +5,7 @@ import { getStatementRow, prepare, runStatement } from "./sqlite";
 export interface CacheEntry<T> {
   key: string;
   value: T;
+  updatedAt?: number;
 }
 
 const PRUNE_INTERVAL_MS = 60_000;
@@ -21,7 +22,7 @@ const DELETE_BY_PREFIX_SQL = "DELETE FROM cache_entries WHERE key LIKE ? ESCAPE 
 const DELETE_BY_EXACT_OR_PREFIX_SQL =
   "DELETE FROM cache_entries WHERE key = ? OR key LIKE ? ESCAPE '\\'";
 const LIST_BY_EXACT_OR_PREFIX_SQL =
-  "SELECT key, value FROM cache_entries WHERE (key = ? OR key LIKE ? ESCAPE '\\') AND expires_at > ?";
+  "SELECT key, value, updated_at FROM cache_entries WHERE (key = ? OR key LIKE ? ESCAPE '\\') AND expires_at > ?";
 
 let lastPruneAt = 0;
 
@@ -133,12 +134,17 @@ export async function listCacheEntriesByExactOrPrefix<T>(
     const rows = statement.all(prefix, likePattern, Date.now()) as {
       key?: unknown;
       value?: unknown;
+      updated_at?: unknown;
     }[];
     const entries: CacheEntry<T>[] = [];
     for (const row of rows) {
       if (typeof row.key !== "string" || typeof row.value !== "string") continue;
       try {
-        entries.push({ key: row.key, value: JSON.parse(row.value) as T });
+        entries.push({
+          key: row.key,
+          value: JSON.parse(row.value) as T,
+          updatedAt: Number.isFinite(Number(row.updated_at)) ? Number(row.updated_at) : 0,
+        });
       } catch (error) {
         logDebug("cacheStore.list.parse_failed", {
           key: row.key,
