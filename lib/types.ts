@@ -2,7 +2,7 @@ export type Lang = "ru" | "en";
 
 export type GameSource = "library" | "wishlist";
 
-export type DateSource = "steam" | "steamYear" | "rawg" | "unknown";
+export type DateSource = "steam" | "steamYear" | "rawg" | "unknown" | "manual";
 
 export interface SteamFullGameRef {
   appid: number;
@@ -37,6 +37,8 @@ export interface UpcomingGame {
   publisher?: string;
   price?: SteamPriceOverview;
   priceCc?: string;
+  /** Date set by hand from the Early Access panel ("from early access"). */
+  fromEarlyAccess?: boolean;
 }
 
 export interface SteamSession {

@@ -12,6 +12,9 @@ import { logDebug } from "@/lib/debug";
 import { calendarSideQueryValue, type CalendarSide } from "@/lib/display-mode";
 import { formatTemplate, monthName, tFor, weekdayNames } from "@/lib/i18n";
 import { collectUpcoming } from "@/lib/upcoming";
+import { earlyAccessStoreCc } from "@/lib/early-access-core.ts";
+import { mergeManualReleaseDates } from "@/lib/manual-release-dates-core.ts";
+import { reconcileManualReleaseDates } from "@/lib/manual-release-dates";
 import type { CalendarView } from "@/lib/display-mode";
 import type { IdentifiedSession, Lang, UpcomingGame } from "@/lib/types";
 import { CalendarGrid } from "./CalendarGrid";
@@ -36,7 +39,13 @@ export async function CalendarFeed({
   year: number;
   month1: number;
 }) {
-  const result = await collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY);
+  const collected = await collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY);
+  const manualEntries = await reconcileManualReleaseDates(
+    session.steamId,
+    earlyAccessStoreCc(session.storeCc)
+  );
+  const result = { ...collected, games: mergeManualReleaseDates(collected.games, manualEntries) };
+  logDebug("calendar.manualDates.merged", { entries: manualEntries.length });
   logDebug("calendarFeed.render", {
     view,
     side,

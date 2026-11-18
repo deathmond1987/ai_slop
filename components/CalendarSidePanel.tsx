@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { earlyAccessGameToUpcoming, type EarlyAccessSessionResult } from "@/lib/early-access-core";
+import {
+  earlyAccessGameToUpcoming,
+  type EarlyAccessSessionResult,
+} from "@/lib/early-access-core";
 import { tFor } from "@/lib/i18n-core";
 import {
   calendarSideQueryValue,
@@ -82,6 +85,45 @@ export function CalendarSidePanel({
     }
   }, []);
 
+  const blacklistEarlyAccessGame = useCallback(async (game: UpcomingGame): Promise<boolean> => {
+    try {
+      const response = await fetch("/api/early-access/blacklist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appid: game.appid, name: game.name, headerImage: game.headerImage }),
+      });
+      if (!response.ok) return false;
+      // Drop any in-flight poll result that may still contain this game.
+      loadIdRef.current += 1;
+      inFlightRef.current = false;
+      setEarlyAccessGames((games) => games.filter((g) => g.appid !== game.appid));
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const setEarlyAccessReleaseDate = useCallback(
+    async (game: UpcomingGame, date: string): Promise<boolean> => {
+      try {
+        const response = await fetch("/api/release-date", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            appid: game.appid,
+            releaseDate: date,
+            name: game.name,
+            headerImage: game.headerImage,
+          }),
+        });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     if (!earlyAccessLoading) return;
 
@@ -131,7 +173,13 @@ export function CalendarSidePanel({
       </nav>
 
       {side === "earlyAccess" ? (
-        <EarlyAccessSection lang={lang} games={earlyAccessGames} loading={earlyAccessLoading} />
+        <EarlyAccessSection
+          lang={lang}
+          games={earlyAccessGames}
+          loading={earlyAccessLoading}
+          onBlacklist={blacklistEarlyAccessGame}
+          onSetReleaseDate={setEarlyAccessReleaseDate}
+        />
       ) : (
         <TBDSection lang={lang} games={tbdGames} />
       )}

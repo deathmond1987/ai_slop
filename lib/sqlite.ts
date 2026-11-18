@@ -4,8 +4,13 @@ import path from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { logDebug, sanitizeDebugError } from "./debug";
 import {
+  MANUAL_RELEASE_DATES_TABLE_SQL,
+} from "./manual-release-dates-core.ts";
+import {
+  EARLY_ACCESS_BLACKLIST_TABLE_SQL,
   EARLY_ACCESS_CATALOG_STATE_TABLE_SQL,
   EARLY_ACCESS_EXPERIMENTAL_TABLE_SQL,
+  EARLY_ACCESS_NEGATIVE_TABLE_SQL,
   EARLY_ACCESS_TABLE_SQL,
 } from "./early-access-core.ts";
 
@@ -70,6 +75,9 @@ CREATE INDEX IF NOT EXISTS calendar_feeds_steam_id_idx ON calendar_feeds (steam_
 ${EARLY_ACCESS_TABLE_SQL}
 ${EARLY_ACCESS_EXPERIMENTAL_TABLE_SQL}
 ${EARLY_ACCESS_CATALOG_STATE_TABLE_SQL}
+${EARLY_ACCESS_NEGATIVE_TABLE_SQL}
+${EARLY_ACCESS_BLACKLIST_TABLE_SQL}
+${MANUAL_RELEASE_DATES_TABLE_SQL}
 `;
 
 let dbPromise: Promise<DatabaseSync | undefined> | undefined;
@@ -123,6 +131,26 @@ export async function getDb(): Promise<DatabaseSync | undefined> {
   if (dbUnavailable) return undefined;
   if (!dbPromise) dbPromise = openDb();
   return dbPromise;
+}
+
+/** Runs fn inside a single write transaction; no-op wrapper if the DB is unavailable. */
+export async function withTransaction<T>(fn: (db: DatabaseSync) => T): Promise<T | undefined> {
+  const db = await getDb();
+  if (!db) return undefined;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn(db);
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // ignore rollback failures
+    }
+    logDebug("sqlite.transaction.failed", { error: sanitizeDebugError(error) });
+    return undefined;
+  }
 }
 
 export async function prepare(sql: string): Promise<StatementSync | undefined> {

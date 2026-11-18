@@ -10,6 +10,7 @@ import {
 } from "@/lib/calendar-layout";
 import { formatTemplate, tFor } from "@/lib/i18n-core";
 import type { Lang, UpcomingGame } from "@/lib/types";
+import { DayDropZone } from "./DayDropZone";
 import { GameCard } from "./GameCard";
 
 export function CalendarGrid({
@@ -104,12 +105,11 @@ export function CalendarGrid({
                       contentSlots > 1
                         ? ({ gridTemplateColumns: `repeat(${contentSlots}, var(--calendar-game-card-min-track))` } as CSSProperties)
                         : undefined;
-                    const weekday = weekdays[index] ?? "";
 
                     return (
-                      <div
+                      <DayDropZone
                         key={cell.iso}
-                        title={weekday}
+                        iso={cell.iso}
                         className={[
                           "calendar-day-cell bg-white dark:bg-zinc-950",
                           cell.inMonth ? "" : "opacity-40",
@@ -129,6 +129,7 @@ export function CalendarGrid({
                               key={`${cell.iso}-${game.appid}`}
                               game={game}
                               lang={lang}
+                              removableFromCalendar
                             />
                           ))}
                         </div>
@@ -147,12 +148,13 @@ export function CalendarGrid({
                                   game={game}
                                   lang={lang}
                                   variant="compact"
+                                  removableFromCalendar
                                 />
                               ))}
                             </div>
                           </details>
                         )}
-                      </div>
+                      </DayDropZone>
                     );
                   })}
                 </div>
