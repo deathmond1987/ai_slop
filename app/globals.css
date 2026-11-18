@@ -105,6 +105,14 @@ html:not(.light) footer {
   color: var(--foreground);
 }
 
+body:has(.calendar-feed-with-tbd) main {
+  background: #f4f4f5;
+}
+
+.dark body:has(.calendar-feed-with-tbd) main {
+  background: #0a0a0a;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
@@ -806,6 +814,7 @@ body:has(.onboarding-page) .settings-remove-btn:hover {
   }
 }
 
+/* Light theme: slightly recessed day cells so cards read as raised tiles. */
 .calendar-day-cell {
   position: relative;
   display: grid;

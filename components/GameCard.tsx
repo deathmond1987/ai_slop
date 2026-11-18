@@ -187,7 +187,7 @@ export function GameCard({
             setOpen(true);
           }}
           title={tooltip}
-          className="release-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
+          className="release-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-zinc-50 shadow-sm dark:bg-zinc-900 dark:shadow-none hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
           <div className="release-game-image">
             {game.headerImage ? (
@@ -243,7 +243,7 @@ export function GameCard({
           }}
           {...dragProps}
           title={tooltip}
-          className="compact-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
+          className="compact-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-zinc-50 shadow-sm dark:bg-zinc-900 dark:shadow-none hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
           {game.headerImage ? (
             <div className="compact-game-media">
@@ -286,7 +286,7 @@ export function GameCard({
         }}
         {...dragProps}
         title={tooltip}
-        className="calendar-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
+        className="calendar-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-zinc-50 shadow-sm dark:bg-zinc-900 dark:shadow-none hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
           {game.headerImage ? (
             <div className="calendar-game-media">

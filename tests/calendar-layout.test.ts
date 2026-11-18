@@ -240,7 +240,8 @@ test("weekday columns without cards still render normal calendar day cells", () 
 
   assert.doesNotMatch(gridSource, /className="calendar-day-cell calendar-day-cell-empty"/);
   assert.doesNotMatch(globalsSource, /\.calendar-day-cell\.calendar-day-cell-empty\s*{/);
-  assert.match(gridSource, /"calendar-day-cell bg-white dark:bg-zinc-950"/);
+  // Light theme tints day cells slightly so cards read as raised tiles.
+  assert.match(gridSource, /"calendar-day-cell bg-zinc-100 dark:bg-zinc-950"/);
 });
 
 test("calendar header and week rows share parent weekday column tracks", () => {

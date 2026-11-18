@@ -80,7 +80,7 @@ export function CalendarGrid({
               {weekdays.map((weekday) => (
                 <div
                   key={weekday}
-                  className="bg-zinc-100 dark:bg-zinc-900 text-center font-medium py-1"
+                  className="bg-zinc-200 dark:bg-zinc-900 text-center font-medium py-1"
                 >
                   {weekday}
                 </div>
@@ -111,7 +111,7 @@ export function CalendarGrid({
                         key={cell.iso}
                         iso={cell.iso}
                         className={[
-                          "calendar-day-cell bg-white dark:bg-zinc-950",
+                          "calendar-day-cell bg-zinc-100 dark:bg-zinc-950",
                           cell.inMonth ? "" : "opacity-40",
                           cell.isToday ? "ring-2 ring-blue-500" : "",
                         ].join(" ")}
