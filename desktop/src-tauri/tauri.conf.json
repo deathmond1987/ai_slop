@@ -22,6 +22,7 @@
         "title": "Steam Calendar",
         "width": 1280,
         "height": 860,
+    "dragDropEnabled": false,
         "minWidth": 900,
         "minHeight": 600,
         "center": true

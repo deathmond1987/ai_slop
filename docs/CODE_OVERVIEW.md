@@ -199,7 +199,31 @@ Dynamic Early Access API:
 - читает query-параметры `refresh`, `full`, `pages`, `wait` и legacy `k=...|refresh=1`;
 - если передан `appids`, вызывает `lookupEarlyAccessAppIds(...)` и возвращает matched Early Access appids после appdetails genre validation; при enabled `experimentalEarlyAccess` matched candidates проверяются без partial budget, а при disabled experimental Early Access применяются ограничения `EARLY_ACCESS_LOOKUP_VALIDATE_MAX`;
 - иначе по умолчанию вызывает non-blocking `getEarlyAccessSessionSnapshot(...)` (стартует фоновый расчёт и сразу возвращает текущий progress/`in_progress`);
-- при `wait=1` вызывает blocking `getEarlyAccessSessionResult(...)` и ждёт финальный `EarlyAccessSessionResult`.
+- при `wait=1` вызывает blocking `getEarlyAccessSessionResult(...)` и ждёт финальный `EarlyAccessSessionResult`;
+- перед ответом убирает заблокированные игры пользователя через `applyEarlyAccessBlacklist`.
+
+Основной путь сборки — `GetItems` (`lib/early-access-getitems.ts`): список купленных игр проверяется пачками по 200, флаг `release.is_early_access` сразу даёт готовый список за несколько секунд. Каталог по тегу 493, проверка жанров и таблица отрицательных результатов остались запасным путём и включаются опцией в настройках (или `EARLY_ACCESS_GETITEMS=0`), если `GetItems` не ответил.
+
+### `app/api/early-access/blacklist/route.ts`
+Персональный блеклист Early Access-игр (GET/POST/DELETE).
+- Все методы требуют Steam session, без неё отдают `401 {"ok":false,"error":"signed_out"}`.
+- `GET` возвращает `{ ok, entries: [{ appid, name, headerImage, createdAt }] }`.
+- `POST` принимает `{ appid, name?, headerImage? }`; пишет в `early_access_blacklist` (upsert, привязано к `steam_id`).
+- `DELETE` принимает `{ appids: number[] }` и удаляет их одним запросом `IN (...)` внутри транзакции.
+- `GET /api/early-access` (и `wait=1`) дополнительно фильтрует заблокированные игры через `applyEarlyAccessBlacklist`; кэш и прогресс при этом не меняются, поэтому разблокировка действует сразу.
+
+### `app/api/release-date/route.ts`
+Ручные даты релиза (GET/POST/DELETE), привязаны к пользователю.
+- `GET` — список записей `{ appid, releaseDate, name, headerImage, createdAt }`.
+- `POST` — `{ appid, releaseDate: "YYYY-MM-DD", name?, headerImage? }`; дата валидируется через `isValidReleaseDate` (реальная календарная дата).
+- `DELETE` — `{ appid }` снимает дату.
+- Записи используются `components/CalendarFeed.tsx` и счётчиком: `mergeManualReleaseDates` подменяет дату игры и ставит `fromEarlyAccess`, новых игр добавляет в календарь.
+
+### `app/api/history/route.ts`
+GET, история библиотеки для вкладки History: купленные игры плюс `GetItems` (дата первого выхода, полный релиз, тип объекта). Результат кэшируется на 30 минут по `apiKeyHash` и `storeCc`. Без API-ключа `reason: "no_api_key"`.
+
+### `app/api/account-stats/route.ts`
+GET, статистика аккаунта для окна «Статистика»: количество объектов по типам, игры в раннем доступе, даты, часы, блеклист, ручные даты, распределение по годам. Считается по `loadLibrary` и кэшируется на 30 минут. Без входа `401`, без API-ключа `ready: false`.
 
 ## Auth routes
 
@@ -318,6 +342,8 @@ Main calendar page `/calendar`, `dynamic = "force-dynamic"`.
 - Показывает flash сообщения `?feed=created` и `?feed=revoked`.
 - Всегда показывает `CalendarExportButton` для `/calendar/ics` и `CalendarViewToggle` с текущим `side`.
 - Оборачивает `CalendarFeed` в `<Suspense fallback={<CalendarFeedSkeleton view={view} />}>`, чтобы тяжелая сборка upcoming games не блокировала rendering shell-страницы.
+- Показывает третью кнопку переключения вида `history`; при ней вместо календаря рендерится `HistoryView`.
+- Счётчик игр у кнопки «По датам» считает серверный компонент `CalendarUpcomingCount` внутри `<Suspense fallback={null}>`: он берёт тот же закэшированный `collectUpcoming` плюс ручные даты и отдаёт число всех будущих релизов, включая игры с одной лишь годовой датой. Так шапка не ждёт сбор данных.
 
 ### `app/calendar/loading.tsx`
 Next.js loading boundary для `/calendar`.
@@ -334,6 +360,8 @@ Settings page `/settings`.
 - Steam API key и RAWG key inputs всегда пустые (`defaultValue=""`) и type password.
 - Store country code input limited to 2 letters и показывает formatted value через `formatSteamStoreCc`.
 - Для каждого saved значения показывает отдельный remove form с submit button `name="remove"`, `value="steam"|"rawg"|"store"` для удаления из сохранённых settings.
+- Содержит форму опции «Запасной поиск Early Access» (fallback на старый способ проверки через поиск по каталогу и жанры), если Steam `GetItems` не отвечает.
+- Подвал страницы: слева кнопка «Заблокированные игры» (`EarlyAccessBlacklistButton`), справа «Статистика» (`AccountStatsButton`).
 
 ### `app/theme/route.ts`
 Route handler for POST `/theme`.
@@ -413,10 +441,41 @@ Client component правой aside-панели `/calendar`.
 - Early Access загружается фоном через poll `/api/early-access`: пока `ready=false`/`in_progress`, в tab count показывается spinner вместо числа; найденные games сразу мапятся через `earlyAccessGameToUpcoming` и появляются в `EarlyAccessSection`.
 - Рендерит `EarlyAccessSection`, если `side === "earlyAccess"`, иначе `TBDSection`.
 
+### `components/HistoryView.tsx`
+Client-компонент вкладки History (`view=history`).
+- Слева колонка годов (от новых к старым) с числом игр в каждом плюс отдельная кнопка «Без даты»; годы делят высоту поровну и не скроллятся, при наведении/фокусе увеличиваются.
+- Сверху кнопка поиска, превращающаяся в поле ввода; поиск идёт по названию по всей библиотеке.
+- Справа прокручиваемая область: выбранный год разложен по месяцам, внутри — сетки компактных карточек с днём выхода в углу. Скроллбар скрыт, прокрутка колесом.
+- Клик по игре открывает обычную модалку `GameCard` (переход на год по клику отключён).
+- Данные берутся из `/api/history`; группировка по годам и месяцам считается на клиенте через `lib/history-core.ts`.
+
+### `components/AccountStatsButton.tsx`
+Клиентская кнопка «Статистика» в подвале `/settings`.
+- Открывает `ModalShell` со списком метрик из `/api/account-stats` и гистограммой выходов по годам.
+- Использует те же стили, что и кнопка блеклиста (`settings-blacklist-btn`), но стоит справа.
+
+### `components/EarlyAccessBlacklistButton.tsx`
+Клиентская кнопка «Заблокированные игры» в подвале `/settings`.
+- Открывает `ModalShell` со списком блеклиста: картинка, название, чекбоксы, «Выбрать все».
+- Разблокировка уходит `DELETE /api/early-access/blacklist` и при успехе сразу закрывает окно.
+
+### `components/DayDropZone.tsx`
+Клиентская зона сброса для дня календаря.
+- Принимает `iso` даты и оборачивает ячейку сетки.
+- При перетаскивании карточки из Early Access подсвечивается и по `drop` пишет дату через `POST /api/release-date`, затем делает `router.refresh()`.
+- Экспортирует `DRAG_MIME` и `readDragGame`; MIME-тип данных — `application/x-steam-calendar-game`.
+
+### `components/drag-drop-state.ts`
+Мини-модуль, различающий «карточку уронили в зону» и «утащили за пределы календаря».
+- `markDropHandled()` вызывается зоной сброса, `consumeDropHandled()` — по `dragend` карточки.
+- Позволяет отличить удаление даты (бросили вне сетки) от переноса на другой день.
+
 ### `components/CalendarFeed.tsx`
 Server component with `import "server-only"`, core renderer для `/calendar` feed content.
 - Принимает `session`, `lang`, `view`, `side`, `year`, `month1`.
 - Вызывает только `collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY)` и не ждёт Early Access расчёт.
+- Поверх результата накладывает ручные даты: `reconcileManualReleaseDates(...)` (сверяет их со Steam и подменяет настоящей датой, если игра уже вышла) и `mergeManualReleaseDates(...)`.
+- При `view === "history"` страница рендерит `HistoryView` вместо `CalendarFeed`; правый aside при этом не показывается.
 - Логирует `view`, `side`, `year`, `month1`, count games/warnings/wishlistPrivate.
 - Делит games на:
   - TBD: без exact `releaseDate` и без `releaseYear`;
@@ -446,10 +505,11 @@ Suspense fallback skeleton для всей calendar page.
 - Используется `app/calendar/loading.tsx` и частично как визуальная модель page loading state.
 
 ### `components/CalendarViewToggle.tsx`
-Server component toggle grid/list.
+Server component toggle grid/list/history.
 - Рендерит form с server action `setCalendarView`.
-- Принимает `lang`, `view`, `side`, `year`, `month1`.
-- Передаёт hidden `month`, hidden `side` как `calendarSideQueryValue(side)` и submit button `name="view"` value `grid` или `list`, поэтому переключение grid/list сохраняет текущую правую панель.
+- Принимает `lang`, `view`, `side`, `year`, `month1` и `countSlot` (ReactNode).
+- Передаёт hidden `month`, hidden `side` как `calendarSideQueryValue(side)` и три submit button `name="view"` со значениями `grid`, `list`, `history`, поэтому переключение вида сохраняет текущую правую панель.
+- `countSlot` — место для счётчика будущих релизов у кнопки «По датам»; страница передаёт туда стриминговый `CalendarUpcomingCount` в `Suspense`.
 - Active/inactive styling через локальные class strings.
 
 ### `components/MonthNav.tsx`
@@ -494,6 +554,8 @@ Shared section for owned Steam Early Access games in the calendar side panel.
 - Empty state (when not loading) uses localized `calendar.earlyAccess.empty`.
 - Mirrors `TBDSection` layout: 2-column compact grid, `FitBlock`, `compact-grid tbd-grid fit h-full` and `GameCard variant="compact"`.
 - Renders cards with key `early-access-${g.appid}`; games can appear progressively while `loading` remains true.
+- Передаёт в карточки `onBlacklist` и `onSetReleaseDate`; блеклист убирает игру из списка и из счётчика вкладки, установка даты отправляет игру в календарь с пометкой «из раннего доступа».
+- Счётчика «проверено / осталось» больше нет: GetItems проверяет всю библиотеку за секунды, и число не было информативным.
 
 ### `components/YearOnlySection.tsx`
 Server component for selected-year known-year-only games in grid view.
@@ -525,6 +587,10 @@ Client component with no rendered output.
 
 ### `components/GameCard.tsx`
 Client component game card/modal renderer.
+- Props для интерактивных сценариев: `onBlacklist` (красная кнопка «Блеклист» в модалке, используется в списке Early Access), `onSetReleaseDate` (карточка становится перетаскиваемой, в модалке появляется выбор даты), `removableFromCalendar` (карточка календаря с ручной датой).
+- Перетаскивание: `dragStart` кладёт в `dataTransfer` JSON `{ appid, name, headerImage }` под `DRAG_MIME`; `dragEnd` проверяет `consumeDropHandled()` — если зона сброса не приняла карточку, дата снимается через `DELETE /api/release-date`.
+- Карточки с `removableFromCalendar` и `fromEarlyAccess` получают красную круглую кнопку «×» в правом нижнем углу (`calendar-card-remove`): на сенсорных экранах перетаскивания нет, кнопка дублирует удаление.
+- Бейдж «из раннего доступа» (`game-card-ea-badge`) показывается у игр с `fromEarlyAccess`.
 - Variants:
   - `grid`: default calendar cell card with media area, title, price, badges;
   - `row`: release list card with left header image and info block;
@@ -540,6 +606,14 @@ Client component game card/modal renderer.
 
 ## Lib modules
 
+### `lib/account-stats-core.ts`
+- Чистый расчёт статистики аккаунта без `server-only`.
+- `computeAccountStats({ owned, items, blacklisted, manualDates })` возвращает `AccountStats`: всего объектов, игры/DLC/демо/программы/прочее по типу GetItems (`0` игра, `4` DLC, `12` демо и плейтесты, `6` программы), игры в раннем доступе, число с датой выхода, самая ранняя и поздняя дата, суммарные часы, игры с наигранным временем и без, блеклист, ручные даты, распределение по годам.
+- Снятые с продажи объекты (`itemType` неизвестен) считаются играми.
+
+### `lib/account-stats.ts`
+- Серверная обёртка статистики: `getAccountStats(session)` использует общий `loadLibrary`, читает блеклист и ручные даты, кэширует результат на 30 минут по `steamId`, `apiKeyHash` и `storeCc`.
+
 ### `lib/aggregate-cache.ts`
 - Кэш агрегированных upcoming-релизов для конкретного steamId, API-ключей и даты.
 - Экспортирует `UPCOMING_CACHE_PREFIX = "upcoming:v5:"`, `UPCOMING_CACHE_TTL_MS = 300_000`, `upcomingCacheTtlMs()`, `shortHash()`, `upcomingStoreCcHash()`, `upcomingCacheKey()`, `loadUpcomingWithCache<T>()`.
@@ -552,7 +626,8 @@ Client component game card/modal renderer.
 
 ### `lib/cache-store.ts`
 - SQLite KV-кэш `cache_entries` с JSON-значениями и TTL.
-- Экспортирует `cacheGet<T>`, `cacheSet`, `deleteCacheByPrefix`, `deleteCacheByExactOrPrefix`.
+- Экспортирует `cacheGet<T>`, `cacheSet`, `cacheGetMany(keys)`, `cacheSetMany(entries)`, `deleteCacheByPrefix`, `deleteCacheByExactOrPrefix`, `listCacheEntriesByExactOrPrefix`.
+- `cacheGetMany`/`cacheSetMany` — пакетные варианты: чтение идёт запросами по 400 ключей, запись одной транзакцией. Используются при массовой проверке библиотеки через GetItems.
 - Периодически удаляет протухшие записи; повреждённый JSON удаляется; невалидный TTL или не-сериализуемое значение молча не записывается.
 
 ### `lib/cached-dedupe.ts`
@@ -586,10 +661,11 @@ Client component game card/modal renderer.
 - `DEFAULT_DICT` указывает на английский словарь, поэтому отсутствующий ru-ключ даёт английский текст.
 
 ### `lib/display-mode.ts`
-- Определение режима отображения календаря: `grid` или `list`.
+- Определение режима отображения календаря: `grid`, `list` или `history` (вкладка истории библиотеки).
 - Определение выбранной правой aside-панели: `tbd` или `earlyAccess`.
 - Экспортирует `CalendarView`, `CalendarSide`, `VIEW_COOKIE = "calendar_view"`, `parseView(raw)`, `parseCalendarSide(raw)`, `calendarSideQueryValue(side)`, `getCalendarView(steamId?)`.
 - Приоритет view: cookie `calendar_view` → сохранённая настройка пользователя → fallback `grid`.
+- `history` хранится так же, как остальные виды: в cookie и в `user_settings.calendar_view`; значение колонки расширено, ограничения CHECK в схеме нет.
 - Side не хранится в cookie/user settings: `parseCalendarSide` читает query-параметр, принимает `tbd`, `early-access`, `earlyAccess`, `ea` и fallback `tbd`.
 - `calendarSideQueryValue(side)` возвращает canonical URL value `tbd` или `early-access` для query, hidden form fields и side panel links.
 
@@ -600,19 +676,40 @@ Client component game card/modal renderer.
 - `EarlyAccessGame` хранит минимум `appid`, `name`, `steamUrl`, `playtimeForever`, а также опциональные enriched-поля `headerImage`, `steamType`, `isFree`, `releaseDate`, `releaseYear` и `price`.
 - Функции: `applyEarlyAccessAppDetails`, `parseAppIdList`, `earlyAccessStoreCc`, `earlyAccessCatalogCacheKey`, `earlyAccessPageSize`, `earlyAccessMaxPages`, `earlyAccessLookupValidateMax`, `earlyAccessFullMaxPages`, `earlyAccessSearchDelayMs`, `earlyAccessTimeoutMs`, `earlyAccessSearchSort`, `earlyAccessSearchUrl`, `parseEarlyAccessSearchPage`, `shouldFetchNextEarlyAccessPage`, `createEarlyAccessCatalogStatus`, `hasEarlyAccessGenre`, `isEarlyAccessConfirmedAppDetails`, `isEarlyAccessConfirmedGame`, `normalizeEarlyAccessGame`, `earlyAccessGameToUpcoming`.
 - Таблица `early_access_appids` хранит appid + store_cc + checked_at с индексами по store_cc и checked_at.
+- Здесь же объявлены таблицы блеклиста (`early_access_blacklist`), отрицательных результатов старого пути (`early_access_negative_appids`) и хелперы `applyEarlyAccessBlacklist`, `excludeRecentlyNegativeAppids`, `earlyAccessBlacklistDeleteManySql`.
+- `EarlyAccessSessionResult` содержит `games`, `indexedCount`, `checkedAt`, `totalKnown`, `partial`, `warnings`; поля прогресса проверки нет.
 
 ### `lib/early-access.ts`
 - Server-side слой сборки Early Access каталога и intersection с owned Steam games.
+- `startEarlyAccessSessionBuild` сначала пробует `buildEarlyAccessGetItemsResult` (весь список купленных игр через GetItems, без каталога). При его падении: если включён «Запасной поиск Early Access» — уходит в `buildEarlyAccessSessionResult`, иначе возвращает ошибку. `EARLY_ACCESS_GETITEMS=0` принудительно выбирает старый путь.
 - Экспортирует `EarlyAccessFetchOptions`, `EarlyAccessLookupOptions`, `ensureEarlyAccessCatalog`, `getEarlyAccessSessionResult`, `getEarlyAccessSessionSnapshot`, `lookupEarlyAccessAppIds`.
 - `ensureEarlyAccessCatalog` нормализует `storeCc`, читает DB meta, использует SQLite KV cache и `pendingCatalogStatuses` для dedup, fetchит Steam search pages tag `493` и сохраняет appids в `early_access_appids`.
 - Catalog TTL: normal full/partial index — 24h, partial index — 6h, negative/empty fetch — 1min; fetch failure сохраняет fallback DB status и warning `early_access_fetch_failed`.
 - `getEarlyAccessSessionSnapshot` стартует фоновый session build и сразу возвращает cached/progress/`in_progress` snapshot без ожидания финала; progress публикуется по мере нахождения confirmed games.
-- `getEarlyAccessSessionResult` требует signed-in session и Steam API key, ждёт финальный результат, кэширует session result по `earlyaccess:owned:details:v4:<steamId>:<apiKeyHash>:<storeCc>:<experimentalFlag>` на 10min, затем фильтрует owned games через Early Access appid index и подтверждает membership по `steamGenres` / `Early Access` genre label.
+- `getEarlyAccessSessionResult` требует signed-in session и Steam API key, ждёт финальный результат, кэширует session result по `earlyaccess:owned:details:v4:getitems2:<steamId>:<apiKeyHash>:<storeCc>:<experimentalFlag>` на 10min (сегмент `getitems2` отделяет результат нового пути от старого), затем фильтрует owned games через Early Access appid index и подтверждает membership по `steamGenres` / `Early Access` genre label.
 - После intersection Early Access games обогащаются через `getAppDetails` для всех initial known owned appids с low priority и текущим `storeCc`; при enabled `experimentalEarlyAccess` дополнительно проверяются все missing owned candidates chunks через unbounded appdetails validation с progressive publish; результат сохраняет `name`, `header_image`, `type`, `is_free`, `price_overview`, `steamGenres` и нормализованную release date/year через `applyEarlyAccessAppDetails`.
 - Если appdetails enrichment падает, session result остаётся с fallback `Steam App <appid>` names и warning `early_access_details_failed`.
 - Если enrichированная игра имеет confirmed `steamGenres` без `Early Access`, она удаляется из session result с warning `early_access_nonconfirmed_filtered`; игры без genre metadata остаются unknown/retained.
 - `lookupEarlyAccessAppIds` принимает список/строку appids, парсит positive integers, при необходимости гарантирует catalog, возвращает subset appids из `early_access_appids` и фильтрует confirmed non-EA appids через appdetails genres; при enabled `experimentalEarlyAccess` matched candidates проверяются без partial budget, а при disabled experimental Early Access применяются ограничения `earlyAccessLookupValidateMax()` (default 100, env cap 200).
 - Если disabled lookup validation пропущена из-за слишком большого matched list, возвращается `early_access_lookup_validation_skipped` warning; при enabled `experimentalEarlyAccess` validation выполняется без skip/partial warning; при фильтрации — `early_access_nonconfirmed_filtered`.
+
+### `lib/early-access-blacklist.ts`
+- Персональный блеклист Early Access-игр в SQLite (`early_access_blacklist`, PK `steam_id, appid`, `ON DELETE CASCADE`).
+- Экспортирует `listEarlyAccessBlacklist`, `loadEarlyAccessBlacklistSet`, `addEarlyAccessBlacklist`, `removeEarlyAccessBlacklist`.
+- Массовая разблокировка удаляет пачками `DELETE ... WHERE appid IN (...)` (по 400) внутри `withTransaction` и возвращает число удалённых строк.
+- Фильтрация списка не трогает кэш: `applyEarlyAccessBlacklist` применяется в API-ответе, поэтому разблокировка видна сразу.
+
+### `lib/early-access-getitems-core.ts`
+- Чистый слой Steam `IStoreBrowseService/GetItems` без `server-only`: построение запроса, разбор ответа, нарезка батчей.
+- Экспортирует `STEAM_GET_ITEMS_URL`, `STEAM_GET_ITEMS_BATCH_MAX = 200`, `STEAM_GET_ITEMS_NOT_IN_STORE = 15`, `chunkAppids`, `buildGetItemsUrl`, `parseGetItemsEarlyAccess`, `applyGetItemsToGame`, `earlyAccessGetItemsEnabled`.
+- Батч ограничен 200 appid: 500 Steam отвергает с `400`, а 250 семизначных appid уже упираются в длину URL (`414 URI Too Long`), потому что `input_json` передаётся в query string.
+- `parseGetItemsEarlyAccess` отдаёт `earlyAccess`, `name`, `headerImage`, `itemType`, `releaseTs` (первый выход, включая старт раннего доступа) и `fullReleaseTs` (выход из раннего доступа).
+- Снятые с продажи и скрытые в регионе игры приходят с `success: 15` и `appid: 0`; они считаются «проверенными, не Early Access», а appid восстанавливается по позиции в ответе.
+
+### `lib/early-access-getitems.ts`
+- Серверная загрузка статусов через GetItems: `getEarlyAccessStatusBatch(appids, storeCc)`.
+- Кэш по appid: сутки для уверенного ответа, 10 минут для неизвестного (`earlyAccess: null`); чтение и запись пакетные (`cacheGetMany`/`cacheSetMany`).
+- Бросает исключение только если не удалось получить ничего вообще — тогда вызывающий код переходит на старый механизм.
 
 ### `lib/i18n-core.ts`
 - Doменно-независимая переводческая и форматтирующая логика ru/en.
@@ -639,10 +736,36 @@ Client component game card/modal renderer.
 - Экспортирует `formatMoney(totalCents, currency, lang)`.
 - В русской локали используются неразрывные пробелы и запятая как десятичный разделитель; бездробные валюты форматируются без копеек.
 
+### `lib/history-core.ts`
+- Чистая логика вкладки History: `buildHistoryGames`, `summarizeHistoryYears`, `groupHistoryYearByMonth`, `matchesHistorySearch`, `isoDateFromUnix`.
+- `buildHistoryGames` оставляет только тип `0` (игры), подставляет имя и картинку из GetItems, отдаёт `releaseDate` и `fullReleaseDate`. Остальные типы (DLC, демо, инструменты, мультиплеерные клиенты) отбрасываются; снятые с продажи проходят, если у них есть тип или дата.
+- Год считается по первому выходу (включая старт раннего доступа), месяц — из `YYYY-MM-DD` в UTC.
+
+### `lib/history.ts`
+- Серверная сборка истории: `getHistory(session)` использует общий `loadLibrary`, результат кэшируется на 30 минут по `apiKeyHash` и `storeCc`.
+
+### `lib/library.ts`
+- Общий загрузчик библиотеки: `loadLibrary(session)` возвращает `{ owned, items, storeCc, apiKeyHash }`.
+- Объединяет `getOwnedGames` (кэш 10 минут) и `getEarlyAccessStatusBatch` (кэш сутки); используется Early Access, историей и статистикой, чтобы не дублировать один и тот же цикл в трёх местах.
+
+### `lib/manual-release-dates-core.ts`
+- Чистый слой ручных дат релиза: SQL для таблицы `manual_release_dates`, тип `ManualReleaseDateEntry`, `isValidReleaseDate`, `manualEntryToUpcoming`, `mergeManualReleaseDates`, `realReleaseDateFor`.
+- `mergeManualReleaseDates` накладывает ручную дату на собранный календарь: существующие игры получают дату, `dateSource: "manual"` и `fromEarlyAccess`, отсутствующие добавляются.
+- `realReleaseDateFor` отдаёт настоящую дату релиза только когда игра уже вышла из раннего доступа (`earlyAccess === false`), беря `fullReleaseTs`, иначе `releaseTs`. Пока игра в раннем доступе, дата пользователя остаётся в силе.
+
+### `lib/manual-release-dates.ts`
+- Серверное хранилище ручных дат: `listManualReleaseDates`, `setManualReleaseDate`, `removeManualReleaseDate`, `removeManualReleaseDates` (пакетно внутри транзакции), `reconcileManualReleaseDates`.
+- `reconcileManualReleaseDates` перед сборкой календаря сверяет ручные даты со Steam и, если игра уже вышла, заменяет дату настоящей и сохраняет её в базу.
+
 ### `lib/pagination.ts`
 - Небольшая сборка query-строки из произвольных параметров.
 - Экспортирует `GRID_DAY_CAP = 1` и `buildQuery(params)`.
 - Пропускает `undefined`, `null` и пустые строки; для массивов добавляет несколько значений одного ключа, для остальных перезаписывает значение.
+
+### `lib/process-singleton.ts`
+- Хранит разделяемое состояние процесса в `globalThis` под `Symbol.for("steam-calendar:<name>")`.
+- Нужен потому, что Next.js включает один и тот же модуль `lib/*` в несколько серверных чанков (страница, route handlers, server actions). Обычные модульные `Map`/счётчики в этом случае дублируются, и дедупликация запросов, ограничитель и пул слотов перестают быть общими.
+- Через него живут: in-flight дедупликация `upcoming`, `wishlist`, `rawg`, `steam`, `early-access`, состояния ограничителя Store, пул запросов деталей и очередь повторов.
 
 ### `lib/rawg-core.ts`
 - Ключи и TTL для кэша RAWG без сетевых вызовов.
@@ -671,19 +794,31 @@ Client component game card/modal renderer.
 
 ### `lib/sqlite.ts`
 - Ленивое открытие SQLite через `node:sqlite`, инициализация схемы и кэш prepared statements.
-- Экспортирует `getDb()`, `prepare(sql)`, `runStatement(sql, ...args)`, `getStatementRow<T>(sql, ...args)`.
+- Экспортирует `getDb()`, `prepare(sql)`, `runStatement(sql, ...args)`, `getStatementRow<T>(sql, ...args)`, `withTransaction<T>(fn)`.
+- `withTransaction` выполняет `BEGIN IMMEDIATE` → `fn(db)` → `COMMIT` с `ROLLBACK` при ошибке; используется для пакетных записей и массовых `DELETE ... IN (...)`.
+- Соединение одно на процесс и синхронное (`node:sqlite`), поэтому вложенных транзакций и параллельных писателей нет — на этом держится безопасность `withTransaction`.
 - Путь БД берётся из `DB_SQLITE_PATH` → `CACHE_SQLITE_PATH` → `data/steam-calendar.sqlite`; включаются WAL, `busy_timeout`, foreign keys.
 
 ### `lib/steam-core.ts`
 - Чистые константы, TTL, ключи и парсеры Steam, переиспользуемые в тестах и без `server-only`.
 - Экспортирует `APP_DETAILS_TRANSIENT_MISS`, `SteamProfile`, `SteamCacheableAppDetails`, `appDetailsCacheKey`, `ownedCacheKey`, `steamProfileCacheKey`, `parseSteamProfileHtml`, `normalizeSteamProfileAvatar`, `normalizeSteamProfileDisplayName`.
 - Содержит env-настройки concurrency/min-interval/TTL; volatile-даты и transient misses укорачивают TTL.
+- Здесь же константы ограничителя Steam Store: `STEAM_STORE_RATE_LIMIT_MAX_REQUESTS = 300`, `_WINDOW_MS = 5 мин`, `_MIN_INTERVAL_MS = 200`, `_COOLDOWN_MS = 5 мин`, `_MAX_WAIT_MS = 15000` и функции-геттеры с парсингом env.
 
 ### `lib/steam.ts`
 - Серверный слой реальных запросов к Steam Web API и Store-страницам.
 - Экспортирует `getPlayerSummaries`, `getSteamProfile`, `getOwnedGames`, `getAppDetails`, `extractSteamIdFromOpenId`.
 - Использует `steam-core.ts`, SQLite cache и дедупликацию; `getAppDetails` имеет семафор, pacing и три состояния: данные, подтверждённый негатив, transient miss.
 - `getAppDetails` запрашивает `filters=basic,genres,release_date,price_overview` и использует cache prefix `appdetails:v2:` для кэширования genre metadata.
+- Запросы к `store.steampowered.com` проходят через `reserveSteamStoreRequest` (см. `lib/steam-rate-limit.ts`), ответы `403`/`429` регистрируются через `registerSteamStoreFailure` и ставят хост на паузу.
+- Состояние пула запросов деталей (очереди слотов, счётчики, интервал) лежит в `processSingleton`, поэтому общее для всех серверных чанков Next.js.
+
+### `lib/steam-rate-limit.ts`
+- Ограничитель запросов к `store.steampowered.com` (каталог раннего доступа и `appdetails`), состояние в `processSingleton`.
+- `reserveSteamStoreRequest(url, maxWaitMs?)` сразу резервирует конкретное время старта в очереди и ждёт его, поэтому параллельные вызовы не просыпаются вместе и не пересчитывают ожидание наперегонки. Окно — скользящее, есть минимальный интервал между запросами.
+- Возвращает `{ allowed, waitedMs, blockedMs }`; отказ возможен, если ожидание превышает лимит или хост на паузе после `403`/`429`.
+- `registerSteamStoreFailure(url, status, retryAfter)` ставит хост на паузу (`Retry-After` учитывается, но не превышает максимум кулдауна).
+- `resetSteamStoreRateLimitState()` и `steamStoreRateLimitStats()` — для тестов и диагностики.
 
 ### `lib/store-cc.ts`
 - Нормализация регионального Steam store code.
@@ -694,6 +829,8 @@ Client component game card/modal renderer.
 - Общие доменные типы приложения.
 - Экспортирует `Lang`, `GameSource`, `DateSource`, `SteamFullGameRef`, `SteamPriceOverview`, `UpcomingGame`, `SteamSession`, `RawgHit`, `IdentifiedSession`.
 - Чистый файл без runtime-кода; `UpcomingGame` содержит `sources[]`, `releaseDate`, `dateSource`, цену и `priceCc`.
+- `DateSource` включает `manual` — дату, заданную пользователем.
+- `UpcomingGame.fromEarlyAccess` помечает игру, дата которой пришла из раннего доступа; по этому флагу карточка показывает бейдж «из раннего доступа» и кнопку удаления из календаря.
 
 ### `lib/upcoming-candidates.ts`
 - Чистый конвейер кандидатов upcoming: wishlist + owned games + appdetails + RAWG targets + filters.
@@ -749,6 +886,14 @@ Client component game card/modal renderer.
 ### `tests/cache-dedupe.test.ts`
 - Проверяет общий cache/dedupe паттерн и steam/rawg TTL/ключи.
 - Проверяет конкурентный miss, негативный кэш, очистку `pending` при ошибке, `APP_DETAILS_TRANSIENT_MISS`, volatile/negative/stable TTL.
+
+### `tests/early-access-getitems.test.ts`
+- Проверяет чистый слой GetItems: нарезку батчей по 200 с дедупликацией и отбрасыванием невалидных appid, вид запроса (release/assets, country code), разбор `is_early_access`, картинок из `asset_url_format`, тип объекта и даты выхода.
+- Отдельно проверяет, что снятые с продажи и скрытые в регионе объекты (`success: 15`, `appid: 0`) считаются «не Early Access» и восстанавливаются по позиции.
+
+### `tests/cache-bulk.test.ts`
+- Проверяет пакетные `cacheSetMany`/`cacheGetMany` на настоящей SQLite: круговой проход значений, отсутствие истёкших ключей.
+- Проверяет, что генераторы массового `DELETE ... IN (...)` для блеклиста и ручных дат дают по одному `?` на appid.
 
 ### `tests/calendar.test.ts`
 - Проверяет месячную сетку и группы релизов.
@@ -835,14 +980,17 @@ Client component game card/modal renderer.
 - Проверяет расчёт суммы и скидок вишлиста.
 - Проверяет валютную изоляцию, owned exclusion, inference скидок, merge candidates и фильтрацию устаревших wishlist candidates.
 
+### `tests/early-access.test.ts`
+- Кроме схемы каталога и констант проверяет, что недавно отклонённые игры пропускаются, и что `realReleaseDateFor` отдаёт настоящую дату только после выхода из раннего доступа.
+
 ### `tests/wishlist-total-cache.test.ts`
 - Интеграционный тест `getWishlistTotalForSession` с временным SQLite и mocked fetch.
 - Проверяет refresh: устаревшая кэшированная wishlist-игра убирается, актуальная остаётся, итог формируется из appdetails.
 
 ## .tmp-validation
 
-- Каталог `/workspace/ai_slop/.tmp-validation` содержит временные артефакты ручной/локальной проверки и не является частью приложения.
-- Всего примерно 95 временных файлов и одна генерируемая директория `pw-browsers`.
+- Каталог `/workspace/ai_slop/.tmp-validation` содержит временные артефакты ручной/локальной проверки (Playwright, справочные материалы) и не является частью приложения.
+- Его можно удалить целиком; приложение от него не зависит.
 - Типы артефактов: HTML dumps календаря/настроек/home, текстовые headers, stdout/stderr логи, JSON ответы wishlist total, SQLite test DB/SHM/WAL файлы, Playwright smoke logs, временные инспекционные `.mjs`/`.ts` скрипты.
 - Некоторые файлы имеют `.ts` расширения и формально могут попадать в TypeScript project include из-за `tsconfig.json` include patterns; они не должны рассматриваться как production source.
 - Каталог не описан в main file inventory и используется как рабочий scratch space для отладки calendar, session, wishlist, Steam API и Playwright проверок.

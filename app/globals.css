@@ -224,6 +224,41 @@ body:has(.settings-page) main .settings-page {
   min-height: 0;
 }
 
+body:has(.settings-page) main .settings-page:has(> .settings-footer) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+body:has(.settings-page) .settings-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-bottom: calc(0.75rem * var(--ui-scale));
+}
+
+body:has(.settings-page) .settings-blacklist-btn {
+  box-sizing: border-box;
+  height: calc(1.75rem * var(--ui-scale));
+  padding: 0 calc(0.75rem * var(--ui-scale));
+  border: 0;
+  border-radius: 0.375rem;
+  background: #1b2838;
+  color: #fff;
+  font-size: var(--text-scale-10);
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+}
+
+body:has(.settings-page) .settings-blacklist-btn:hover {
+  background: #2a475e;
+}
+
+body:has(.settings-page) .settings-blacklist-btn:focus-visible {
+  outline: 2px solid #66c0f4;
+  outline-offset: 2px;
+}
+
 body:has(.settings-page) main .settings-grid {
   display: grid;
   min-width: 0;
@@ -805,6 +840,7 @@ body:has(.onboarding-page) .settings-remove-btn:hover {
 
 /* Карточка сохраняет персистентную высоту; трек не сжимается ниже card-min-track (в 1.3× шире высоты). */
 .calendar-game-card {
+  position: relative;
   display: grid;
   min-width: 0;
   height: var(--calendar-game-card-height);
@@ -1391,4 +1427,342 @@ body:has(.onboarding-page) .settings-remove-btn:hover {
   .release-game-info {
     padding: 0.5rem;
   }
+}
+
+/* History view: year column on the left, scrollable year calendar on the right. */
+.history-view {
+  display: grid;
+  grid-template-columns: calc(6.5rem * var(--ui-scale)) minmax(0, 1fr);
+  gap: 0.5rem;
+  min-height: 0;
+  height: calc(100dvh - var(--layout-header-height) - 3.75rem);
+  min-height: 24rem;
+  align-items: stretch;
+}
+
+.history-years {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  height: 100%;
+  min-height: 0;
+  padding-right: 0.25rem;
+  border-right: 1px solid var(--surface-border);
+}
+
+.history-search-btn,
+.history-search-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: calc(1.6rem * var(--ui-scale));
+  padding: 0 0.4rem;
+  border: 1px solid var(--surface-border);
+  border-radius: 0.375rem;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-scale-10);
+}
+
+.history-search-btn {
+  text-align: left;
+  color: #6b7280;
+}
+
+.history-search-btn:hover {
+  background: rgb(0 0 0 / 0.05);
+}
+
+.dark .history-search-btn:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+
+/* Years share the available height and widen on hover instead of scrolling. */
+.history-year-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  overflow: visible;
+}
+
+.history-year-list .history-year-btn {
+  flex: 1 1 0;
+  min-height: 0;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+  transform-origin: left center;
+}
+
+.history-year-list .history-year-btn:hover,
+.history-year-list .history-year-btn:focus-visible {
+  position: relative;
+  z-index: 5;
+  transform: scale(1.06);
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 0.25);
+  outline: 1px solid var(--surface-border);
+}
+
+.history-year-list .history-year-btn.is-active:hover {
+  background: #1b2838;
+}
+
+.history-year-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.2rem 0.4rem;
+  border: 0;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-scale-10);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: left;
+}
+
+.history-year-btn:hover {
+  background: rgb(0 0 0 / 0.06);
+}
+
+.dark .history-year-btn:hover {
+  background: rgb(255 255 255 / 0.08);
+}
+
+.history-year-btn.is-active {
+  background: #1b2838;
+  color: #fff;
+}
+
+.history-year-count {
+  opacity: 0.6;
+  font-size: calc(var(--text-scale-10) * 0.9);
+}
+
+/* Wheel scrolling still works; the scrollbar itself is hidden. */
+.history-calendar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.history-calendar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.history-month-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+  font-size: var(--text-scale-10);
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.history-month-count {
+  opacity: 0.55;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-month-empty {
+  font-size: var(--text-scale-10);
+  opacity: 0.35;
+}
+
+.history-game-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(9.5rem * var(--ui-scale)), 1fr));
+  gap: 0.35rem;
+}
+
+.history-game-cell {
+  position: relative;
+  min-width: 0;
+}
+
+.history-game-day {
+  position: absolute;
+  right: 0.2rem;
+  bottom: 0.2rem;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+  background: rgb(0 0 0 / 0.65);
+  color: #fff;
+  font-size: calc(var(--text-scale-10) * 0.85);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.history-empty {
+  padding: 1rem;
+  font-size: var(--text-scale-10);
+  opacity: 0.7;
+}
+
+@media (max-width: 640px) {
+  .history-view {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .history-years {
+    max-height: 40vh;
+    border-right: 0;
+    border-bottom: 1px solid var(--surface-border);
+  }
+
+  .history-calendar {
+    overflow: visible;
+  }
+}
+
+/* Dropping an Early Access card onto a calendar day sets its release date. */
+.calendar-day-cell.is-drop-target {
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+  background: rgb(37 99 235 / 0.08);
+}
+
+.calendar-day-cell.is-drop-saving {
+  cursor: progress;
+}
+
+.compact-game-card[draggable="true"] {
+  cursor: grab;
+}
+
+.game-card-ea-badge {
+  display: inline-block;
+  margin-top: 0.15rem;
+  padding: 0 0.25rem;
+  border-radius: 0.25rem;
+  background: rgb(251 191 36 / 0.35);
+  color: #78350f;
+  font-size: calc(var(--text-scale-10) * 0.85);
+  line-height: 1.35;
+}
+
+.dark .game-card-ea-badge {
+  background: rgb(120 53 15 / 0.6);
+  color: #fde68a;
+}
+
+/* Account statistics modal. */
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.25rem 0.75rem;
+  font-size: var(--text-scale-10);
+}
+
+.stats-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.15rem 0;
+  border-bottom: 1px dashed var(--surface-border);
+}
+
+.stats-row dt {
+  opacity: 0.7;
+}
+
+.stats-row dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.stats-subtitle {
+  margin-bottom: 0.25rem;
+  font-size: var(--text-scale-10);
+  font-weight: 600;
+}
+
+.stats-years {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.stats-year-row {
+  display: grid;
+  grid-template-columns: 3rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: var(--text-scale-10);
+  font-variant-numeric: tabular-nums;
+}
+
+.stats-year-label {
+  opacity: 0.7;
+}
+
+.stats-year-bar {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: #2563eb;
+}
+
+.stats-year-count {
+  text-align: right;
+}
+
+/* Count inside a view tab, separated with a divider like the side panel tabs. */
+.calendar-view-count {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 0.375rem;
+  padding-left: 0.375rem;
+  border-left: 1px solid currentColor;
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Explicit "remove from calendar" affordance: drag&drop does not exist on touch. */
+.calendar-card-remove {
+  position: absolute;
+  right: 0.2rem;
+  bottom: 0.2rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(1.1rem * var(--ui-scale));
+  height: calc(1.1rem * var(--ui-scale));
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: rgb(220 38 38 / 0.9);
+  color: #fff;
+  font-size: calc(0.85rem * var(--ui-scale));
+  line-height: 1;
+  cursor: pointer;
+}
+
+.calendar-card-remove:hover {
+  background: #dc2626;
+}
+
+.calendar-card-remove:disabled {
+  opacity: 0.5;
+  cursor: progress;
 }
