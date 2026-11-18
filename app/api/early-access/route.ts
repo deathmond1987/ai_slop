@@ -4,6 +4,8 @@ import {
   getEarlyAccessSessionSnapshot,
   lookupEarlyAccessAppIds,
 } from "@/lib/early-access";
+import { applyEarlyAccessBlacklist } from "@/lib/early-access-core";
+import { loadEarlyAccessBlacklistSet } from "@/lib/early-access-blacklist";
 import { getSteamSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -45,11 +47,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json(result);
   }
 
-  if (wait) {
-    const result = await getEarlyAccessSessionResult(session, options);
-    return NextResponse.json(result);
-  }
-
-  const result = await getEarlyAccessSessionSnapshot(session, options);
-  return NextResponse.json(result);
+  const blacklisted = session?.steamId
+    ? await loadEarlyAccessBlacklistSet(session.steamId)
+    : new Set<number>();
+  const result = wait
+    ? await getEarlyAccessSessionResult(session, options)
+    : await getEarlyAccessSessionSnapshot(session, options);
+  return NextResponse.json(applyEarlyAccessBlacklist(result, blacklisted));
 }

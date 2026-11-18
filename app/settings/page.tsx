@@ -4,6 +4,8 @@ import { getLang, getT } from "@/lib/i18n";
 import { requireSteamSession } from "@/lib/session";
 import { formatSteamStoreCc } from "@/lib/store-cc";
 import { saveSettings } from "@/app/actions/settings";
+import { AccountStatsButton } from "@/components/AccountStatsButton";
+import { EarlyAccessBlacklistButton } from "@/components/EarlyAccessBlacklistButton";
 import { getThemePreference, type ThemePreference } from "@/lib/theme-mode";
 
 const SETTINGS_SAVED_TARGETS = new Set<string>([
@@ -313,6 +315,11 @@ export default async function SettingsPage({
             </button>
           </form>
         </div>
+      </div>
+
+      <div className="settings-footer">
+        <EarlyAccessBlacklistButton lang={lang} />
+        <AccountStatsButton lang={lang} />
       </div>
     </section>
   );

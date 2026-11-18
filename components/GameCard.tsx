@@ -1,6 +1,9 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { DRAG_MIME } from "./DayDropZone";
+import { consumeDropHandled } from "./drag-drop-state";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import { tFor, formatDateWithYear, formatPlaytime, formatTemplate } from "@/lib/i18n-core";
@@ -51,11 +54,20 @@ export function GameCard({
   lang,
   variant = "grid",
   disableNestedModal = false,
+  onBlacklist,
+  onSetReleaseDate,
+  removableFromCalendar = false,
 }: {
   game: UpcomingGame;
   lang: Lang;
   variant?: "grid" | "row" | "compact";
   disableNestedModal?: boolean;
+  /** When set, the game modal shows a blacklist action (Early Access list). */
+  onBlacklist?: (game: UpcomingGame) => Promise<boolean>;
+  /** When set, the card is draggable and the modal can set a release date. */
+  onSetReleaseDate?: (game: UpcomingGame, date: string) => Promise<boolean>;
+  /** Calendar cards with a manual date can be dragged out of the calendar to remove them. */
+  removableFromCalendar?: boolean;
 }) {
   const t = tFor(lang);
   const [open, setOpen] = useState(false);
@@ -86,8 +98,75 @@ export function GameCard({
         : "rounded bg-zinc-200 dark:bg-zinc-800 px-1 py-0 text-scale-9",
   }));
   const tooltip = `${game.name}${game.dateSourceUrl ? ` · ${game.dateSourceUrl}` : ""}`;
+  const router = useRouter();
+  const [removing, setRemoving] = useState(false);
+  const clearReleaseDate = async (event?: React.MouseEvent) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (removing) return;
+    setRemoving(true);
+    try {
+      const response = await fetch("/api/release-date", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ appid: game.appid }),
+      });
+      if (response.ok) router.refresh();
+    } catch {
+      // ignore: the date stays until the next successful removal
+    } finally {
+      setRemoving(false);
+    }
+  };
+  // Touch and mouse users cannot drag out of the calendar, so show an explicit button.
+  const removeButton = removableFromCalendar && game.fromEarlyAccess ? (
+    <button
+      type="button"
+      className="calendar-card-remove"
+      title={t("calendar.removeFromCalendar")}
+      aria-label={t("calendar.removeFromCalendar")}
+      disabled={removing}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        void clearReleaseDate();
+      }}
+    >
+      ×
+    </button>
+  ) : null;
+  const draggable = Boolean(onSetReleaseDate || removableFromCalendar);
+  const dragProps = draggable
+    ? {
+        draggable: true,
+        onDragStart: (e: React.DragEvent<HTMLAnchorElement>) => {
+          e.dataTransfer.setData(
+            DRAG_MIME,
+            JSON.stringify({ appid: game.appid, name: game.name, headerImage: game.headerImage })
+          );
+          e.dataTransfer.effectAllowed = "copyMove";
+        },
+        onDragEnd: () => {
+          // No drop zone took the card: the user dragged it out of the calendar.
+          const removesOnDragOut = removableFromCalendar;
+          window.setTimeout(() => {
+            if (consumeDropHandled() || !removesOnDragOut || !game.fromEarlyAccess) return;
+            void clearReleaseDate();
+          }, 0);
+        },
+      }
+    : {};
   const modal = open && !disableNestedModal
-    ? createPortal(<GameModal game={game} lang={lang} onClose={close} />, document.body)
+    ? createPortal(
+        <GameModal
+          game={game}
+          lang={lang}
+          onClose={close}
+          onBlacklist={onBlacklist}
+          onSetReleaseDate={onSetReleaseDate}
+        />,
+        document.body
+      )
     : null;
   const dateText = game.releaseDate
     ? formatDateWithYear(game.releaseDate, lang)
@@ -162,6 +241,7 @@ export function GameCard({
             e.preventDefault();
             setOpen(true);
           }}
+          {...dragProps}
           title={tooltip}
           className="compact-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
@@ -182,6 +262,9 @@ export function GameCard({
           <div className="compact-game-info">
             <div className="font-medium leading-tight line-clamp-2 min-w-0">{game.name}</div>
             <PriceText game={game} t={t} className="compact-game-price text-scale-9" />
+            {game.fromEarlyAccess ? (
+              <span className="game-card-ea-badge">{t("modal.fromEarlyAccess")}</span>
+            ) : null}
           </div>
         </a>
 
@@ -201,8 +284,9 @@ export function GameCard({
           e.preventDefault();
           setOpen(true);
         }}
+        {...dragProps}
         title={tooltip}
-          className="calendar-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
+        className="calendar-game-card group rounded border border-zinc-300 dark:border-zinc-700 overflow-hidden bg-white dark:bg-zinc-900 hover:shadow-md transition-shadow text-scale-10 leading-tight cursor-pointer"
         >
           {game.headerImage ? (
             <div className="calendar-game-media">
@@ -218,6 +302,7 @@ export function GameCard({
           ) : (
             <div className="calendar-game-media bg-zinc-200 dark:bg-zinc-800" />
           )}
+          {removeButton}
           <div className="calendar-game-info">
             <div className="font-medium leading-tight line-clamp-1 min-w-0">{game.name}</div>
             <PriceText game={game} t={t} className="calendar-game-price text-scale-9" />
@@ -245,12 +330,34 @@ function GameModal({
   game,
   lang,
   onClose,
+  onBlacklist,
+  onSetReleaseDate,
 }: {
   game: UpcomingGame;
   lang: Lang;
   onClose: () => void;
+  onBlacklist?: (game: UpcomingGame) => Promise<boolean>;
+  onSetReleaseDate?: (game: UpcomingGame, date: string) => Promise<boolean>;
 }) {
   const t = tFor(lang);
+  const [blacklistState, setBlacklistState] = useState<"idle" | "pending" | "failed">("idle");
+  const [dateOpen, setDateOpen] = useState(false);
+  const [dateValue, setDateValue] = useState(game.releaseDate ?? "");
+  const [dateState, setDateState] = useState<"idle" | "pending" | "failed">("idle");
+  const saveDate = async () => {
+    if (!onSetReleaseDate || !dateValue || dateState === "pending") return;
+    setDateState("pending");
+    const ok = await onSetReleaseDate(game, dateValue);
+    if (ok) onClose();
+    else setDateState("failed");
+  };
+  const blacklist = async () => {
+    if (!onBlacklist || blacklistState === "pending") return;
+    setBlacklistState("pending");
+    const ok = await onBlacklist(game);
+    if (ok) onClose();
+    else setBlacklistState("failed");
+  };
   const isRawg = game.dateSource === "rawg";
   const dateText = game.releaseDate
     ? formatDateWithYear(game.releaseDate, lang)
@@ -411,6 +518,29 @@ function GameModal({
             </div>
           ) : null}
 
+          {onSetReleaseDate && dateOpen ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <label className="text-xs opacity-70" htmlFor={`release-date-${game.appid}`}>
+                {t("modal.releaseDateLabel")}
+              </label>
+              <input
+                id={`release-date-${game.appid}`}
+                type="date"
+                value={dateValue}
+                onChange={(e) => setDateValue(e.target.value)}
+                className="rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+              <button
+                type="button"
+                onClick={() => void saveDate()}
+                disabled={!dateValue || dateState === "pending"}
+                className="rounded bg-blue-600 px-3 py-1 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {dateState === "failed" ? t("modal.blacklistFailed") : t("modal.saveReleaseDate")}
+              </button>
+            </div>
+          ) : null}
+
           <div className="mt-4 flex gap-2">
             <a
               href={game.steamUrl}
@@ -427,6 +557,26 @@ function GameModal({
             >
               {t("modal.close")}
             </button>
+            {onSetReleaseDate ? (
+              <button
+                type="button"
+                onClick={() => setDateOpen((open) => !open)}
+                className="inline-flex items-center justify-center rounded border border-zinc-300 dark:border-zinc-700 text-sm px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                {t("modal.setReleaseDate")}
+              </button>
+            ) : null}
+            {onBlacklist ? (
+              <button
+                type="button"
+                onClick={() => void blacklist()}
+                disabled={blacklistState === "pending"}
+                title={blacklistState === "failed" ? t("modal.blacklistFailed") : undefined}
+                className="ml-auto inline-flex items-center justify-center rounded bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-sm px-3 py-1.5 font-medium"
+              >
+                {blacklistState === "failed" ? t("modal.blacklistFailed") : t("modal.blacklist")}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>
