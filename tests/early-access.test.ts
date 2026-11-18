@@ -566,3 +566,40 @@ test("experimental early access storage and cache constants are user-scoped", ()
     /ON CONFLICT \(steam_id, store_cc, appid\)/
   );
 });
+test("recently negative early access appids are skipped so validation advances", async () => {
+  const { excludeRecentlyNegativeAppids, EARLY_ACCESS_NEGATIVE_TABLE_SQL, EARLY_ACCESS_NEGATIVE_LIST_SQL } =
+    await import("../lib/early-access-core.ts");
+  assert.deepEqual(excludeRecentlyNegativeAppids([5, 4, 3, 2], new Set([4, 2])), [5, 3]);
+  assert.deepEqual(excludeRecentlyNegativeAppids([1, 2], new Set()), [1, 2]);
+  assert.match(EARLY_ACCESS_NEGATIVE_TABLE_SQL, /PRIMARY KEY \(appid, store_cc\)/);
+  assert.match(EARLY_ACCESS_NEGATIVE_LIST_SQL, /checked_at >= \?/);
+});
+
+test("early access blacklist hides games without mutating the result", async () => {
+  const { applyEarlyAccessBlacklist, EARLY_ACCESS_BLACKLIST_TABLE_SQL } = await import(
+    "../lib/early-access-core.ts"
+  );
+  const result = { ready: true, games: [{ appid: 1, name: "A" }, { appid: 2, name: "B" }] } as never as {
+    ready: boolean;
+    games: { appid: number; name: string }[];
+  };
+  const filtered = applyEarlyAccessBlacklist(result as never, new Set([2])) as typeof result;
+  assert.deepEqual(filtered.games.map((g) => g.appid), [1]);
+  assert.equal(result.games.length, 2);
+  assert.equal(applyEarlyAccessBlacklist(result as never, new Set()), result);
+  assert.match(EARLY_ACCESS_BLACKLIST_TABLE_SQL, /PRIMARY KEY \(steam_id, appid\)/);
+  assert.match(EARLY_ACCESS_BLACKLIST_TABLE_SQL, /ON DELETE CASCADE/);
+});
+
+test("a manual date yields to the real release once the game left Early Access", async () => {
+  const { realReleaseDateFor } = await import("../lib/manual-release-dates-core.ts");
+  const leftEa = { earlyAccess: false, releaseTs: 1600353507, fullReleaseTs: 1788937200 };
+  assert.equal(realReleaseDateFor(leftEa), new Date(1788937200 * 1000).toISOString().slice(0, 10));
+  assert.equal(
+    realReleaseDateFor({ earlyAccess: false, releaseTs: 1600353507 }),
+    new Date(1600353507 * 1000).toISOString().slice(0, 10)
+  );
+  // Still in Early Access: the user's own estimate stays in place.
+  assert.equal(realReleaseDateFor({ earlyAccess: true, releaseTs: 1600353507 }), undefined);
+  assert.equal(realReleaseDateFor(undefined), undefined);
+});

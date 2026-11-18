@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { register } from "node:module";
+import { resetSteamStoreRateLimitState } from "../lib/steam-rate-limit.ts";
 
 register(new URL("./ts-extension-resolver.mjs", import.meta.url).href, import.meta.url);
 
@@ -18,6 +19,9 @@ const originalEnv = {
   EARLY_ACCESS_LOOKUP_VALIDATE_MAX: process.env.EARLY_ACCESS_LOOKUP_VALIDATE_MAX,
   STEAM_APPDETAILS_MIN_INTERVAL_MS: process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS,
   STEAM_APPDETAILS_RETRY: process.env.STEAM_APPDETAILS_RETRY,
+  STEAM_STORE_RATE_LIMIT_MAX_REQUESTS: process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS,
+  EARLY_ACCESS_DETAILS_MAX: process.env.EARLY_ACCESS_DETAILS_MAX,
+  EARLY_ACCESS_GETITEMS: process.env.EARLY_ACCESS_GETITEMS,
 };
 
 process.env.DB_SQLITE_PATH = path.join(tempDir, "ea-experimental-flow.sqlite");
@@ -25,6 +29,11 @@ process.env.DB_ENCRYPTION_KEY = "0123456789abcdef".repeat(4);
 delete process.env.EARLY_ACCESS_STORE_CC;
 process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS = "0";
 process.env.STEAM_APPDETAILS_RETRY = "0";
+process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS = "0";
+process.env.EARLY_ACCESS_DETAILS_MAX = "200";
+// These tests cover the legacy search/genre path.
+process.env.EARLY_ACCESS_GETITEMS = "0";
+resetSteamStoreRateLimitState();
 
 interface AppDetailsFixture {
   name: string;
@@ -96,6 +105,7 @@ globalThis.fetch = async (input: RequestInfo | URL) => {
 after(() => {
   globalThis.fetch = originalFetch;
   rmSync(tempDir, { recursive: true, force: true });
+  resetSteamStoreRateLimitState();
 
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) delete process.env[key];

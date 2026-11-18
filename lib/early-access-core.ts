@@ -23,6 +23,8 @@ export const EARLY_ACCESS_DEFAULT_SORT = "reviews_desc";
 export const EARLY_ACCESS_GENRE_LABEL = "Early Access";
 export const EARLY_ACCESS_DEFAULT_LOOKUP_VALIDATE_MAX = 100;
 export const EARLY_ACCESS_LOOKUP_VALIDATE_MAX_LIMIT = 200;
+export const EARLY_ACCESS_DEFAULT_DETAILS_MAX = 80;
+export const EARLY_ACCESS_DETAILS_MAX_LIMIT = 200;
 export const EARLY_ACCESS_OWNED_CACHE_PREFIX = "earlyaccess:owned:details:v4:";
 export const EARLY_ACCESS_CATALOG_STATE_TABLE_NAME = "early_access_catalog_state";
 
@@ -118,6 +120,100 @@ export const EARLY_ACCESS_EXPERIMENTAL_DELETE_ONE_SQL = `
 DELETE FROM early_access_experimental_appids
 WHERE steam_id = ? AND store_cc = ? AND appid = ?
 `;
+
+export const EARLY_ACCESS_NEGATIVE_TTL_DAYS_DEFAULT = 7;
+export const EARLY_ACCESS_NEGATIVE_CHECK_TTL_MS = EARLY_ACCESS_NEGATIVE_TTL_DAYS_DEFAULT * 24 * 60 * 60 * 1000;
+
+export const EARLY_ACCESS_NEGATIVE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS early_access_negative_appids (
+  appid INTEGER NOT NULL,
+  store_cc TEXT NOT NULL,
+  checked_at INTEGER NOT NULL,
+  PRIMARY KEY (appid, store_cc)
+);
+CREATE INDEX IF NOT EXISTS early_access_negative_appids_store_cc_idx ON early_access_negative_appids (store_cc, checked_at);
+`;
+
+export const EARLY_ACCESS_NEGATIVE_UPSERT_SQL = `
+INSERT INTO early_access_negative_appids (appid, store_cc, checked_at)
+VALUES (?, ?, ?)
+ON CONFLICT (appid, store_cc) DO UPDATE SET checked_at = excluded.checked_at
+`;
+
+export const EARLY_ACCESS_NEGATIVE_LIST_SQL = `
+SELECT appid
+FROM early_access_negative_appids
+WHERE store_cc = ? AND checked_at >= ?
+`;
+
+export const EARLY_ACCESS_NEGATIVE_DELETE_ONE_SQL = `
+DELETE FROM early_access_negative_appids
+WHERE appid = ? AND store_cc = ?
+`;
+
+/** Drops appids recently confirmed as not Early Access so validation advances through the library. */
+export function excludeRecentlyNegativeAppids(
+  appids: readonly number[],
+  negativeAppids: ReadonlySet<number>
+): number[] {
+  if (negativeAppids.size === 0) return [...appids];
+  return appids.filter((appid) => !negativeAppids.has(appid));
+}
+
+export const EARLY_ACCESS_BLACKLIST_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS early_access_blacklist (
+  steam_id TEXT NOT NULL REFERENCES users(steam_id) ON DELETE CASCADE,
+  appid INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  header_image TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (steam_id, appid)
+);
+`;
+
+export const EARLY_ACCESS_BLACKLIST_UPSERT_SQL = `
+INSERT INTO early_access_blacklist (steam_id, appid, name, header_image, created_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (steam_id, appid) DO UPDATE SET
+  name = excluded.name,
+  header_image = COALESCE(excluded.header_image, early_access_blacklist.header_image)
+`;
+
+export const EARLY_ACCESS_BLACKLIST_LIST_SQL = `
+SELECT appid, name, header_image, created_at
+FROM early_access_blacklist
+WHERE steam_id = ?
+ORDER BY created_at DESC, appid
+`;
+
+export const EARLY_ACCESS_BLACKLIST_DELETE_ONE_SQL = `
+DELETE FROM early_access_blacklist
+WHERE steam_id = ? AND appid = ?
+`;
+
+/** Bulk delete: placeholders are filled with one "?" per appid. */
+export function earlyAccessBlacklistDeleteManySql(count: number): string {
+  return `DELETE FROM early_access_blacklist WHERE steam_id = ? AND appid IN (${Array.from(
+    { length: Math.max(1, count) },
+    () => "?"
+  ).join(",")})`;
+}
+
+export interface EarlyAccessBlacklistEntry {
+  appid: number;
+  name: string;
+  headerImage?: string;
+  createdAt: number;
+}
+
+/** Hides blacklisted games from an Early Access result without touching cached data. */
+export function applyEarlyAccessBlacklist<T extends { games: EarlyAccessGame[] }>(
+  result: T,
+  blacklisted: ReadonlySet<number>
+): T {
+  if (blacklisted.size === 0 || result.games.length === 0) return result;
+  return { ...result, games: result.games.filter((game) => !blacklisted.has(game.appid)) };
+}
 
 export const EARLY_ACCESS_UPSERT_SQL = `
 INSERT INTO early_access_appids (appid, store_cc, checked_at)
@@ -486,6 +582,14 @@ export function earlyAccessLookupValidateMax(): number {
     process.env.EARLY_ACCESS_LOOKUP_VALIDATE_MAX,
     EARLY_ACCESS_DEFAULT_LOOKUP_VALIDATE_MAX,
     EARLY_ACCESS_LOOKUP_VALIDATE_MAX_LIMIT
+  );
+}
+
+export function earlyAccessDetailsMax(): number {
+  return readPositiveInt(
+    process.env.EARLY_ACCESS_DETAILS_MAX,
+    EARLY_ACCESS_DEFAULT_DETAILS_MAX,
+    EARLY_ACCESS_DETAILS_MAX_LIMIT
   );
 }
 
