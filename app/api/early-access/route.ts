@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { getEarlyAccessSessionResult, lookupEarlyAccessAppIds } from "@/lib/early-access";
+import {
+  getEarlyAccessSessionResult,
+  getEarlyAccessSessionSnapshot,
+  lookupEarlyAccessAppIds,
+} from "@/lib/early-access";
 import { getSteamSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +29,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     full: searchBoolean(params.get("full")),
     pages: searchPages(params.get("pages")),
   };
+  const wait = searchBoolean(params.get("wait"));
 
   const session = await getSteamSession();
   const appids = params.get("appids");
@@ -40,6 +45,11 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.json(result);
   }
 
-  const result = await getEarlyAccessSessionResult(session, options);
+  if (wait) {
+    const result = await getEarlyAccessSessionResult(session, options);
+    return NextResponse.json(result);
+  }
+
+  const result = await getEarlyAccessSessionSnapshot(session, options);
   return NextResponse.json(result);
 }

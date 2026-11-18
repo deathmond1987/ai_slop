@@ -8,6 +8,7 @@ import {
   earlyAccessLookupValidateMax,
   earlyAccessMaxPages,
   earlyAccessPageSize,
+  earlyAccessSearchDelayMs,
   earlyAccessSearchSort,
   earlyAccessSearchUrl,
   earlyAccessStoreCc,
@@ -25,6 +26,7 @@ import {
   hasEarlyAccessGenre,
   isEarlyAccessConfirmedAppDetails,
   isEarlyAccessConfirmedGame,
+  earlyAccessGameToUpcoming,
   normalizeEarlyAccessGame,
   parseAppIdList,
   parseEarlyAccessSearchPage,
@@ -90,6 +92,24 @@ test("earlyAccessLookupValidateMax respects bounded environment override", () =>
   );
 });
 
+test("earlyAccessSearchDelayMs uses a conservative default and clamps bounded overrides", () => {
+  const key = "EARLY_ACCESS_SEARCH_DELAY_MS";
+  const previous = process.env[key];
+  delete process.env[key];
+
+  try {
+    assert.equal(earlyAccessSearchDelayMs(), 600);
+    assert.equal(withEnv(key, "0", () => earlyAccessSearchDelayMs()), 0);
+    assert.equal(withEnv(key, "", () => earlyAccessSearchDelayMs()), 600);
+    assert.equal(withEnv(key, "-1", () => earlyAccessSearchDelayMs()), 600);
+    assert.equal(withEnv(key, "1000", () => earlyAccessSearchDelayMs()), 1000);
+    assert.equal(withEnv(key, "9000", () => earlyAccessSearchDelayMs()), 5000);
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
+});
+
 test("early access genre helpers confirm current EA membership", () => {
   assert.equal(hasEarlyAccessGenre(["Action", " Early Access "]), true);
   assert.equal(hasEarlyAccessGenre(["Action"]), false);
@@ -116,6 +136,27 @@ test("applyEarlyAccessAppDetails stores genres and lets non-EA entries be filter
   assert.deepEqual(enriched.steamGenres, ["Action", "Adventure", "Indie"]);
   assert.equal(isEarlyAccessConfirmedGame(enriched), false);
   assert.equal(isEarlyAccessConfirmedGame(normalizeEarlyAccessGame({ appid: 1 })), null);
+});
+
+test("earlyAccessGameToUpcoming maps enriched Early Access games into calendar cards", () => {
+  const upcoming = earlyAccessGameToUpcoming({
+    appid: 892970,
+    name: "Valheim",
+    steamUrl: "https://store.steampowered.com/app/892970/",
+    headerImage: "https://example.test/header.jpg",
+    playtimeForever: 120,
+    releaseDate: "2021-02-02",
+    releaseYear: 2021,
+    steamType: "game",
+    isFree: false,
+  });
+
+  assert.equal(upcoming.appid, 892970);
+  assert.equal(upcoming.name, "Valheim");
+  assert.deepEqual(upcoming.sources, ["library"]);
+  assert.equal(upcoming.releaseDate, "2021-02-02");
+  assert.equal(upcoming.dateSource, "steam");
+  assert.equal(upcoming.headerImage, "https://example.test/header.jpg");
 });
 
 test("parseAppIdList parses numbers from query strings", () => {

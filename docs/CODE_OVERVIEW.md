@@ -196,9 +196,10 @@ Dynamic wishlist total API:
 
 ### `app/api/early-access/route.ts`
 Dynamic Early Access API:
-- читает query-параметры `refresh`, `full`, `pages` и legacy `k=...|refresh=1`;
-- если передан `appids`, вызывает `lookupEarlyAccessAppIds(...)` и возвращает matched Early Access appids после appdetails genre validation, если matched candidates укладываются в `EARLY_ACCESS_LOOKUP_VALIDATE_MAX`;
-- иначе вызывает `getEarlyAccessSessionResult(...)` для текущей Steam session и возвращает JSON `EarlyAccessSessionResult`.
+- читает query-параметры `refresh`, `full`, `pages`, `wait` и legacy `k=...|refresh=1`;
+- если передан `appids`, вызывает `lookupEarlyAccessAppIds(...)` и возвращает matched Early Access appids после appdetails genre validation; при enabled `experimentalEarlyAccess` matched candidates проверяются без partial budget, а при disabled experimental Early Access применяются ограничения `EARLY_ACCESS_LOOKUP_VALIDATE_MAX`;
+- иначе по умолчанию вызывает non-blocking `getEarlyAccessSessionSnapshot(...)` (стартует фоновый расчёт и сразу возвращает текущий progress/`in_progress`);
+- при `wait=1` вызывает blocking `getEarlyAccessSessionResult(...)` и ждёт финальный `EarlyAccessSessionResult`.
 
 ## Auth routes
 
@@ -404,17 +405,18 @@ Client modal trigger for calendar subscription content.
 - Использует одинаковый визуальный modal window с wishlist counter modal, но свой контент и свой layout внутри контента.
 
 ### `components/CalendarSidePanel.tsx`
-Server component правой aside-панели `/calendar`.
-- Получает `lang`, `view`, `side`, `year`, `month1`, `tbdGames`, `earlyAccessGames`.
+Client component правой aside-панели `/calendar`.
+- Получает `lang`, `view`, `side`, `year`, `month1`, `tbdGames`.
 - Рендерит `<nav className="calendar-side-tabs">` с `aria-label={t("calendar.sidePanel.label")}` вместо generic group.
 - Делает горизонтальные ссылки-табы: `hrefFor("tbd")` и `hrefFor("earlyAccess")` формируют `/calendar?month=...&view=...&side=tbd|early-access`, поэтому month и calendar view сохраняются при выборе правой панели.
 - Подсвечивает active tab через `aria-current="page"` и синий active style; inactive tab использует обычный border style.
+- Early Access загружается фоном через poll `/api/early-access`: пока `ready=false`/`in_progress`, в tab count показывается spinner вместо числа; найденные games сразу мапятся через `earlyAccessGameToUpcoming` и появляются в `EarlyAccessSection`.
 - Рендерит `EarlyAccessSection`, если `side === "earlyAccess"`, иначе `TBDSection`.
 
 ### `components/CalendarFeed.tsx`
 Server component with `import "server-only"`, core renderer для `/calendar` feed content.
 - Принимает `session`, `lang`, `view`, `side`, `year`, `month1`.
-- Вызывает `collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY)`.
+- Вызывает только `collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY)` и не ждёт Early Access расчёт.
 - Логирует `view`, `side`, `year`, `month1`, count games/warnings/wishlistPrivate.
 - Делит games на:
   - TBD: без exact `releaseDate` и без `releaseYear`;
@@ -426,8 +428,7 @@ Server component with `import "server-only"`, core renderer для `/calendar` f
 - Для grid рендерит `CalendarGrid` с month grid, weekday names, navigation nodes `MonthSideNav` prev/next и `MonthTodayLink`.
 - Для list рендерит `ScrollableReleaseList` внутри `ReleaseDateList`.
 - В query для month navigation добавляет `side: calendarSideQueryValue(side)`, чтобы навигация месяца не теряла выбранную правую панель.
-- Если `side === "earlyAccess"`, лениво загружает `getEarlyAccessSessionResult(session)` и превращает EA games в `UpcomingGame` shape с `sources: ["library"]`, enriched `headerImage`, `steamType`, `isFree`, `price`, `releaseDate`/`releaseYear` и `dateSource` from enriched Steam data, а fallback-ом `releaseDate: null` / `dateSource: "unknown"` когда details недоступны.
-- Рендерит aside column `calendar-feed-with-tbd` через `CalendarSidePanel` с `tbdGames` и `earlyAccessGames`; прямой `TBDSection` теперь выбирается внутри side panel по текущему `side`.
+- Рендерит aside column `calendar-feed-with-tbd` через `CalendarSidePanel` с `tbdGames`; Early Access games подгружает сам client side panel.
 
 ### `components/CalendarFeedSkeleton.tsx`
 Suspense fallback skeleton для `CalendarFeed`.
@@ -488,11 +489,11 @@ Server component for games without known release date/year.
 - Renders compact `GameCard` variant with key `tbd-${g.appid}`.
 
 ### `components/EarlyAccessSection.tsx`
-Server component for owned Steam Early Access games in the calendar side panel.
-- Empty state uses localized `calendar.earlyAccess.empty`.
-- Title shows localized `calendar.earlyAccess.title` plus games count.
+Shared section for owned Steam Early Access games in the calendar side panel.
+- Accepts optional `loading`; while loading with no games yet, renders an empty busy shell instead of the empty-state message.
+- Empty state (when not loading) uses localized `calendar.earlyAccess.empty`.
 - Mirrors `TBDSection` layout: 2-column compact grid, `FitBlock`, `compact-grid tbd-grid fit h-full` and `GameCard variant="compact"`.
-- Renders cards with key `early-access-${g.appid}`.
+- Renders cards with key `early-access-${g.appid}`; games can appear progressively while `loading` remains true.
 
 ### `components/YearOnlySection.tsx`
 Server component for selected-year known-year-only games in grid view.
@@ -597,20 +598,21 @@ Client component game card/modal renderer.
 - Экспортирует `EARLY_ACCESS_TAG_ID = 493`, search URL/base, cache prefix/TTL, page/sort/delay/timeout env helpers, `EARLY_ACCESS_TABLE_SQL`, `EARLY_ACCESS_UPSERT_SQL`, `EARLY_ACCESS_LIST_SQL`, `EARLY_ACCESS_META_SQL`.
 - Типы: `EarlyAccessSearchPage`, `EarlyAccessCatalogStatus`, `EarlyAccessGame`, `EarlyAccessAppDetailsInput`, `EarlyAccessSessionResult`, `EarlyAccessLookupResult`.
 - `EarlyAccessGame` хранит минимум `appid`, `name`, `steamUrl`, `playtimeForever`, а также опциональные enriched-поля `headerImage`, `steamType`, `isFree`, `releaseDate`, `releaseYear` и `price`.
-- Функции: `applyEarlyAccessAppDetails`, `parseAppIdList`, `earlyAccessStoreCc`, `earlyAccessCatalogCacheKey`, `earlyAccessPageSize`, `earlyAccessMaxPages`, `earlyAccessLookupValidateMax`, `earlyAccessFullMaxPages`, `earlyAccessSearchDelayMs`, `earlyAccessTimeoutMs`, `earlyAccessSearchSort`, `earlyAccessSearchUrl`, `parseEarlyAccessSearchPage`, `shouldFetchNextEarlyAccessPage`, `createEarlyAccessCatalogStatus`, `hasEarlyAccessGenre`, `isEarlyAccessConfirmedAppDetails`, `isEarlyAccessConfirmedGame`, `normalizeEarlyAccessGame`.
+- Функции: `applyEarlyAccessAppDetails`, `parseAppIdList`, `earlyAccessStoreCc`, `earlyAccessCatalogCacheKey`, `earlyAccessPageSize`, `earlyAccessMaxPages`, `earlyAccessLookupValidateMax`, `earlyAccessFullMaxPages`, `earlyAccessSearchDelayMs`, `earlyAccessTimeoutMs`, `earlyAccessSearchSort`, `earlyAccessSearchUrl`, `parseEarlyAccessSearchPage`, `shouldFetchNextEarlyAccessPage`, `createEarlyAccessCatalogStatus`, `hasEarlyAccessGenre`, `isEarlyAccessConfirmedAppDetails`, `isEarlyAccessConfirmedGame`, `normalizeEarlyAccessGame`, `earlyAccessGameToUpcoming`.
 - Таблица `early_access_appids` хранит appid + store_cc + checked_at с индексами по store_cc и checked_at.
 
 ### `lib/early-access.ts`
 - Server-side слой сборки Early Access каталога и intersection с owned Steam games.
-- Экспортирует `EarlyAccessFetchOptions`, `EarlyAccessLookupOptions`, `ensureEarlyAccessCatalog`, `getEarlyAccessSessionResult`, `lookupEarlyAccessAppIds`.
+- Экспортирует `EarlyAccessFetchOptions`, `EarlyAccessLookupOptions`, `ensureEarlyAccessCatalog`, `getEarlyAccessSessionResult`, `getEarlyAccessSessionSnapshot`, `lookupEarlyAccessAppIds`.
 - `ensureEarlyAccessCatalog` нормализует `storeCc`, читает DB meta, использует SQLite KV cache и `pendingCatalogStatuses` для dedup, fetchит Steam search pages tag `493` и сохраняет appids в `early_access_appids`.
 - Catalog TTL: normal full/partial index — 24h, partial index — 6h, negative/empty fetch — 1min; fetch failure сохраняет fallback DB status и warning `early_access_fetch_failed`.
-- `getEarlyAccessSessionResult` требует signed-in session и Steam API key, кэширует session result по `earlyaccess:owned:details:v3:<steamId>:<apiKeyHash>:<storeCc>` на 10min, затем фильтрует owned games через Early Access appid index и подтверждает membership по `steamGenres` / `Early Access` genre label.
-- После intersection Early Access games обогащаются через `getAppDetails` для первых до 80 appids с low priority и текущим `storeCc`; результат сохраняет `name`, `header_image`, `type`, `is_free`, `price_overview`, `steamGenres` и нормализованную release date/year через `applyEarlyAccessAppDetails`.
+- `getEarlyAccessSessionSnapshot` стартует фоновый session build и сразу возвращает cached/progress/`in_progress` snapshot без ожидания финала; progress публикуется по мере нахождения confirmed games.
+- `getEarlyAccessSessionResult` требует signed-in session и Steam API key, ждёт финальный результат, кэширует session result по `earlyaccess:owned:details:v4:<steamId>:<apiKeyHash>:<storeCc>:<experimentalFlag>` на 10min, затем фильтрует owned games через Early Access appid index и подтверждает membership по `steamGenres` / `Early Access` genre label.
+- После intersection Early Access games обогащаются через `getAppDetails` для всех initial known owned appids с low priority и текущим `storeCc`; при enabled `experimentalEarlyAccess` дополнительно проверяются все missing owned candidates chunks через unbounded appdetails validation с progressive publish; результат сохраняет `name`, `header_image`, `type`, `is_free`, `price_overview`, `steamGenres` и нормализованную release date/year через `applyEarlyAccessAppDetails`.
 - Если appdetails enrichment падает, session result остаётся с fallback `Steam App <appid>` names и warning `early_access_details_failed`.
 - Если enrichированная игра имеет confirmed `steamGenres` без `Early Access`, она удаляется из session result с warning `early_access_nonconfirmed_filtered`; игры без genre metadata остаются unknown/retained.
-- `lookupEarlyAccessAppIds` принимает список/строку appids, парсит positive integers, при необходимости гарантирует catalog, возвращает subset appids из `early_access_appids` и фильтрует confirmed non-EA appids через appdetails genres, если matched candidates <= `earlyAccessLookupValidateMax()` (default 100, env cap 200).
-- Если lookup validation пропущена из-за слишком большого matched list, возвращается `early_access_lookup_validation_skipped` warning; при фильтрации — `early_access_nonconfirmed_filtered`.
+- `lookupEarlyAccessAppIds` принимает список/строку appids, парсит positive integers, при необходимости гарантирует catalog, возвращает subset appids из `early_access_appids` и фильтрует confirmed non-EA appids через appdetails genres; при enabled `experimentalEarlyAccess` matched candidates проверяются без partial budget, а при disabled experimental Early Access применяются ограничения `earlyAccessLookupValidateMax()` (default 100, env cap 200).
+- Если disabled lookup validation пропущена из-за слишком большого matched list, возвращается `early_access_lookup_validation_skipped` warning; при enabled `experimentalEarlyAccess` validation выполняется без skip/partial warning; при фильтрации — `early_access_nonconfirmed_filtered`.
 
 ### `lib/i18n-core.ts`
 - Doменно-независимая переводческая и форматтирующая логика ru/en.
@@ -763,7 +765,7 @@ Client component game card/modal renderer.
 ### `tests/calendar-side-panel.test.ts`
 - Проверяет, что `side` encoded в query, нормализуется через `parseCalendarSide`, canonical value возвращается через `calendarSideQueryValue` и сохраняется hidden input в `CalendarViewToggle`.
 - Проверяет, что `app/calendar/page.tsx` читает `side`, passит его в `CalendarViewToggle` и `CalendarFeed`, и не использует `calendarSideQueryValue` напрямую в page.
-- Проверяет, что `CalendarFeed` loads `getEarlyAccessSessionResult` только для `side === "earlyAccess"`, maps EA games в `UpcomingGame` shape и рендерит `CalendarSidePanel` с `tbdGames`/`earlyAccessGames`.
+- Проверяет, что `CalendarFeed` не ждёт Early Access и рендерит `CalendarSidePanel` только с `tbdGames`, а client panel грузит EA через `/api/early-access` snapshot/poll со spinner в tab count.
 - Проверяет side panel markup: horizontal tabs через `<nav>`, month/view preservation в `hrefFor`, `aria-current` без `role="group"`, and rendering `EarlyAccessSection`/`TBDSection` по выбранному side.
 - Проверяет, что `EarlyAccessSection` и `TBDSection` имеют одинаковый compact layout: `calendar-side-section`, `FitBlock`, `compact-grid tbd-grid fit h-full`, 2-column rows и `GameCard variant="compact"`.
 - Проверяет globals CSS для горизонтальных tabs и fit-viewport aside rules: tabs flex `50%`, aside panel grid `auto minmax(0,1fr)`, side section and `[data-fit-block]` height `100%`.

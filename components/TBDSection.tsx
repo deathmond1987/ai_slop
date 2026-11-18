@@ -1,4 +1,4 @@
-import { tFor } from "@/lib/i18n";
+import { tFor } from "@/lib/i18n-core";
 import type { Lang, UpcomingGame } from "@/lib/types";
 import { FitBlock } from "./FitBlock";
 import { GameCard } from "./GameCard";

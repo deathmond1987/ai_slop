@@ -38,9 +38,15 @@ interface OwnedGameFixture {
   time_created?: number;
 }
 
+interface StoreSearchResponseFixture {
+  status: number;
+  body?: unknown;
+}
+
 let appDetailsByAppid = new Map<number, AppDetailsFixture>();
 let ownedGamesBySteamId = new Map<string, OwnedGameFixture[]>();
 let storeSearchCalls = 0;
+let storeSearchResponses: StoreSearchResponseFixture[] = [];
 
 globalThis.fetch = async (input: RequestInfo | URL) => {
   const url = new URL(String(input));
@@ -70,7 +76,17 @@ globalThis.fetch = async (input: RequestInfo | URL) => {
   }
 
   if (url.hostname.includes("store.steampowered.com") && url.pathname.startsWith("/search/results")) {
+    const fixture = storeSearchResponses[storeSearchCalls] ?? null;
     storeSearchCalls += 1;
+
+    if (fixture?.status === 200) {
+      return Response.json(fixture.body ?? {});
+    }
+
+    if (fixture) {
+      return new Response(`status ${fixture.status}`, { status: fixture.status });
+    }
+
     return new Response("not mocked", { status: 404 });
   }
 
@@ -89,7 +105,7 @@ after(() => {
 
 const authStore = await import("../lib/auth-store.ts");
 const { prepare, runStatement } = await import("../lib/sqlite.ts");
-const { getEarlyAccessSessionResult, lookupEarlyAccessAppIds } = await import("../lib/early-access.ts");
+const { ensureEarlyAccessCatalog, getEarlyAccessSessionResult, lookupEarlyAccessAppIds } = await import("../lib/early-access.ts");
 const { getAppDetails } = await import("../lib/steam.ts");
 const {
   EARLY_ACCESS_EXPERIMENTAL_LIST_SQL,
@@ -161,6 +177,44 @@ test("DB-backed partial Early Access catalog avoids store-search refresh fetches
   assert.ok(result.warnings.includes("early_access_index_partial"));
   assert.ok(!result.warnings.includes("early_access_fetch_failed"));
   assert.equal(storeSearchCalls, 0);
+});
+
+test("ensureEarlyAccessCatalog persists partial progress when Steam rate-limits after a successful page", async () => {
+  storeSearchCalls = 0;
+  storeSearchResponses = [
+    {
+      status: 200,
+      body: {
+        items: [{ appid: 190000001 }],
+        total_count: 200,
+      },
+    },
+    { status: 429 },
+  ];
+
+  const key = "EARLY_ACCESS_SEARCH_DELAY_MS";
+  const previous = process.env[key];
+  process.env[key] = "0";
+
+  try {
+    const status = await ensureEarlyAccessCatalog("pt", {
+      refresh: true,
+      full: true,
+      pages: 2,
+    });
+
+    assert.equal(status.indexedCount, 1);
+    assert.equal(status.pagesFetched, 1);
+    assert.equal(status.totalKnown, 200);
+    assert.equal(status.complete, false);
+    assert.equal(status.partial, true);
+    assert.ok(status.warnings.includes("early_access_index_partial"));
+    assert.ok(status.warnings.includes("early_access_fetch_failed"));
+  } finally {
+    storeSearchResponses = [];
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+  }
 });
 
 test("experimental early access lookup removes stale rows and stores genre-bypass appids", async () => {
@@ -366,7 +420,7 @@ test("experimental early access lookup prioritizes cached confirmed genre appdet
 
   assert.equal(result.ready, true);
   assert.deepEqual(result.earlyAccessAppids, [knownEa, cachedEa]);
-  assert.ok(result.warnings.includes("early_access_lookup_validation_partial"));
+  assert.ok(!result.warnings.includes("early_access_lookup_validation_partial"));
   assert.ok(result.warnings.includes("early_access_genre_validated"));
   assert.ok(result.warnings.includes("early_access_experimental_validated"));
   assert.deepEqual(await experimentalAppids(steamId, storeCc), [cachedEa]);
@@ -430,7 +484,7 @@ test("experimental early access session result prioritizes cached confirmed owne
     result.games.map((game) => game.appid).sort((a, b) => a - b),
     [knownEa, cachedEa]
   );
-  assert.ok(result.warnings.includes("early_access_experimental_validation_partial"));
+  assert.ok(!result.warnings.includes("early_access_experimental_validation_partial"));
   assert.ok(result.warnings.includes("early_access_experimental_validated"));
   assert.deepEqual(await experimentalAppids(steamId, storeCc), [cachedEa]);
 });
@@ -565,7 +619,7 @@ test("experimental early access session result backfills confirmed owned appids 
   assert.equal(storeSearchCalls, 0);
 });
 
-test("experimental early access session result validates recent missing owned candidates before older higher appids", async () => {
+test("experimental early access session result validates all missing owned candidates regardless of validation max", async () => {
   storeSearchCalls = 0;
   const storeCc = "rc";
   const steamId = "10000000000001010";
@@ -613,12 +667,12 @@ test("experimental early access session result validates recent missing owned ca
   assert.equal(result.ready, true);
   assert.deepEqual(
     result.games.map((game) => game.appid).sort((a, b) => a - b),
-    [recentCandidate]
+    [recentCandidate, olderHigherCandidate]
   );
-  assert.ok(result.warnings.includes("early_access_experimental_validation_partial"));
+  assert.ok(!result.warnings.includes("early_access_experimental_validation_partial"));
   assert.ok(result.warnings.includes("early_access_catalog_backfilled"));
   assert.ok(result.warnings.includes("early_access_experimental_validated"));
-  assert.deepEqual(await globalEarlyAccessAppids(storeCc), [knownEa, recentCandidate]);
-  assert.deepEqual(await experimentalAppids(steamId, storeCc), [recentCandidate]);
+  assert.deepEqual(await globalEarlyAccessAppids(storeCc), [knownEa, recentCandidate, olderHigherCandidate]);
+  assert.deepEqual(await experimentalAppids(steamId, storeCc), [recentCandidate, olderHigherCandidate]);
   assert.equal(storeSearchCalls, 0);
 });

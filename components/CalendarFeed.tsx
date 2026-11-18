@@ -8,9 +8,8 @@ import {
   buildYearGroups,
   todayISO,
 } from "@/lib/calendar";
-import { logDebug, sanitizeDebugError } from "@/lib/debug";
+import { logDebug } from "@/lib/debug";
 import { calendarSideQueryValue, type CalendarSide } from "@/lib/display-mode";
-import { getEarlyAccessSessionResult } from "@/lib/early-access";
 import { formatTemplate, monthName, tFor, weekdayNames } from "@/lib/i18n";
 import { collectUpcoming } from "@/lib/upcoming";
 import type { CalendarView } from "@/lib/display-mode";
@@ -37,13 +36,7 @@ export async function CalendarFeed({
   year: number;
   month1: number;
 }) {
-  const [result, earlyAccess] = await Promise.all([
-    collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY),
-    getEarlyAccessSessionResult(session).catch((error) => {
-      logDebug("calendarFeed.earlyAccess.failed", { error: sanitizeDebugError(error) });
-      return null;
-    }),
-  ]);
+  const result = await collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY);
   logDebug("calendarFeed.render", {
     view,
     side,
@@ -60,35 +53,6 @@ export async function CalendarFeed({
   for (const g of result.games) {
     if (!g.releaseDate && typeof g.releaseYear !== "number") tbd.push(g);
   }
-
-  const earlyAccessGames: UpcomingGame[] = (earlyAccess?.games ?? []).map((g): UpcomingGame => ({
-    appid: g.appid,
-    name: g.name,
-    headerImage: g.headerImage,
-    sources: ["library"],
-    releaseDate: g.releaseDate ?? null,
-    releaseYear: g.releaseYear,
-    dateSource: g.releaseDate
-      ? "steam"
-      : typeof g.releaseYear === "number"
-        ? "steamYear"
-        : "unknown",
-    steamUrl: g.steamUrl,
-    steamType: g.steamType,
-    isFree: g.isFree,
-    playtimeForever: g.playtimeForever,
-    price: g.price,
-  }));
-  logDebug("calendarFeed.earlyAccess", {
-    side,
-    year,
-    month1,
-    ready: earlyAccess?.ready ?? false,
-    reason: earlyAccess?.reason,
-    gameCount: earlyAccessGames.length,
-    indexedCount: earlyAccess?.indexedCount ?? 0,
-    warningCount: earlyAccess?.warnings.length ?? 0,
-  });
 
   const yearGroups = buildYearGroups(buildByYearMap(result.games));
   const yearOnlyForSelectedYear =
@@ -177,7 +141,6 @@ export async function CalendarFeed({
             year={year}
             month1={month1}
             tbdGames={tbd}
-            earlyAccessGames={earlyAccessGames}
           />
         </aside>
       </div>

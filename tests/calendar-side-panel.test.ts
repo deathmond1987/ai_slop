@@ -7,17 +7,19 @@ function read(path: string): string {
 }
 
 test("calendar side state is encoded in the query and preserved through view switching", () => {
+  const displayCore = read("lib/display-mode-core.ts");
   const display = read("lib/display-mode.ts");
   const action = read("app/actions/calendar-view.ts");
   const toggle = read("components/CalendarViewToggle.tsx");
   const page = read("app/calendar/page.tsx");
 
-  assert.match(display, /export type CalendarSide = "tbd" \| "earlyAccess";/);
+  assert.match(displayCore, /export type CalendarSide = "tbd" \| "earlyAccess";/);
   assert.match(
-    display,
+    displayCore,
     /if \(value === "early-access" \|\| value === "earlyAccess" \|\| value === "ea"\) return "earlyAccess";/
   );
-  assert.match(display, /return side === "earlyAccess" \? "early-access" : "tbd";/);
+  assert.match(displayCore, /return side === "earlyAccess" \? "early-access" : "tbd";/);
+  assert.match(display, /export \{[\s\S]*parseCalendarSide[\s\S]*\} from "\.\/display-mode-core";/);
 
   assert.match(action, /const side = parseCalendarSide\(String\(formData\.get\("side"\) \?\? ""\)\);/);
   assert.match(action, /new URLSearchParams\(\{ view, side: calendarSideQueryValue\(side\) \}\)/);
@@ -33,27 +35,29 @@ test("calendar side state is encoded in the query and preserved through view swi
   assert.doesNotMatch(page, /import \{ calendarSideQueryValue,/);
 });
 
-test("calendar feed loads early access data alongside upcoming games so both tab counts stay correct", () => {
+test("calendar feed renders without waiting for early access and lets the side panel load it client-side", () => {
   const feed = read("components/CalendarFeed.tsx");
+  const panel = read("components/CalendarSidePanel.tsx");
+  const route = read("app/api/early-access/route.ts");
 
-  assert.match(feed, /import \{ getEarlyAccessSessionResult \} from "@\/lib\/early-access";/);
-  assert.match(
-    feed,
-    /const \[result, earlyAccess\] = await Promise\.all\(\[\s*collectUpcoming\(session, session\.rawgApiKey \?\? process\.env\.RAWG_API_KEY\),\s*getEarlyAccessSessionResult\(session\)\.catch\(/
-  );
-  assert.doesNotMatch(feed, /if \(side === "earlyAccess"\) \{/);
-  assert.match(
-    feed,
-    /earlyAccessGames: UpcomingGame\[\] = \(earlyAccess\?\.games \?\? \[\]\)\.map\(\(g\): UpcomingGame => \(\{[\s\S]*headerImage: g\.headerImage,[\s\S]*sources: \["library"\],[\s\S]*releaseDate: g\.releaseDate \?\? null,[\s\S]*dateSource: g\.releaseDate[\s\S]*"steam"[\s\S]*"steamYear"[\s\S]*"unknown",/
-  );
+  assert.doesNotMatch(feed, /getEarlyAccessSessionResult/);
+  assert.match(feed, /const result = await collectUpcoming\(session, session\.rawgApiKey \?\? process\.env\.RAWG_API_KEY\);/);
   assert.match(
     feed,
     /const query: Record<string, string \| number> = \{[\s\S]*side: calendarSideQueryValue\(side\),/
   );
   assert.match(
     feed,
-    /<CalendarSidePanel[\s\S]*side=\{side\}[\s\S]*tbdGames=\{tbd\}[\s\S]*earlyAccessGames=\{earlyAccessGames\}/
+    /<CalendarSidePanel[\s\S]*side=\{side\}[\s\S]*tbdGames=\{tbd\}/
   );
+  assert.doesNotMatch(feed, /earlyAccessGames=/);
+
+  assert.match(panel, /"use client"/);
+  assert.match(panel, /fetch\("\/api\/early-access"/);
+  assert.match(panel, /getEarlyAccessSessionSnapshot|earlyAccessLoading|calendar-side-tab-spinner/);
+  assert.match(panel, /earlyAccessGameToUpcoming/);
+  assert.match(route, /getEarlyAccessSessionSnapshot/);
+  assert.match(route, /getEarlyAccessSessionResult/);
 });
 
 test("calendar side panel exposes horizontal no-date and early-access tabs without losing month/view state", () => {
@@ -77,8 +81,10 @@ test("calendar side panel exposes horizontal no-date and early-access tabs witho
   );
   assert.match(
     panel,
-    /<span className="calendar-side-tab-label">\{t\("calendar\.sideTab\.earlyAccess"\)\}<\/span>\s*<span className="calendar-side-tab-count">\{earlyAccessGames\.length\}<\/span>/
+    /<span className="calendar-side-tab-label">\{t\("calendar\.sideTab\.earlyAccess"\)\}<\/span>\s*<span className="calendar-side-tab-count" aria-live="polite">/
   );
+  assert.match(panel, /calendar-side-tab-spinner/);
+  assert.match(panel, /earlyAccessLoading \? \([\s\S]*calendar-side-tab-spinner[\s\S]*\) : \(\s*earlyAccessGames\.length\s*\)/);
 });
 
 test("early access side section mirrors the no-date compact grid and compact cards", () => {
@@ -98,6 +104,7 @@ test("early access side section mirrors the no-date compact grid and compact car
   assert.match(earlyAccess, /key=\{`early-access-\$\{g\.appid\}`\}/);
   assert.doesNotMatch(earlyAccess, /t\("calendar\.earlyAccess\.title"\)/);
   assert.match(earlyAccess, /t\("calendar\.earlyAccess\.empty"\)/);
+  assert.match(earlyAccess, /loading = false/);
   assert.match(tbd, /key=\{`tbd-\$\{g\.appid\}`\}/);
   assert.doesNotMatch(tbd, /t\("calendar\.tbd\.title"\)/);
 

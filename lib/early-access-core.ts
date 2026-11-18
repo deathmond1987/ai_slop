@@ -1,7 +1,7 @@
 import { isPlaceholderYearEndDate, parseSteamDateInfo } from "./release-dates.ts";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
 import { APP_DETAILS_CACHE_PREFIX } from "./steam-core.ts";
-import type { SteamPriceOverview } from "./types";
+import type { SteamPriceOverview, UpcomingGame } from "./types";
 
 export const EARLY_ACCESS_TAG_ID = 493;
 export const EARLY_ACCESS_SEARCH_BASE = "https://store.steampowered.com/search/results/";
@@ -13,7 +13,7 @@ export const EARLY_ACCESS_DEFAULT_MAX_PAGES = 8;
 export const EARLY_ACCESS_MAX_REQUEST_PAGES = 20;
 export const EARLY_ACCESS_DEFAULT_FULL_MAX_PAGES = 260;
 export const EARLY_ACCESS_MAX_PAGES_LIMIT = 400;
-export const EARLY_ACCESS_DEFAULT_DELAY_MS = 120;
+export const EARLY_ACCESS_DEFAULT_DELAY_MS = 600;
 export const EARLY_ACCESS_MAX_DELAY_MS = 5000;
 export const EARLY_ACCESS_DEFAULT_TIMEOUT_MS = 15000;
 export const EARLY_ACCESS_MAX_TIMEOUT_MS = 60000;
@@ -197,7 +197,7 @@ export interface EarlyAccessAppDetailsInput {
 
 export interface EarlyAccessSessionResult {
   ready: boolean;
-  reason?: "signed_out" | "no_api_key" | "no_index" | "steam_api";
+  reason?: "signed_out" | "no_api_key" | "no_index" | "steam_api" | "in_progress" | "error";
   storeCc: string;
   games: EarlyAccessGame[];
   indexedCount: number;
@@ -234,8 +234,16 @@ export interface EarlyAccessCachedConfirmedAppid {
 export interface SelectEarlyAccessExperimentalValidateAppidsInput {
   missingAppids: readonly number[];
   cachedAppids?: readonly EarlyAccessCachedConfirmedAppid[];
-  validateBudget: number;
+  uncachedValidateBudget?: number;
+  validateBudget?: number;
+  unboundedUncachedValidation?: boolean;
   preferredStoreCc?: string | null;
+}
+
+export interface SelectEarlyAccessExperimentalValidateAppidsResult {
+  cachedAppids: number[];
+  uncachedAppids: number[];
+  appids: number[];
 }
 
 export interface EarlyAccessPageLoopInput {
@@ -277,7 +285,7 @@ function readPositiveInt(raw: string | undefined, fallback: number, max?: number
 }
 
 function readNonNegativeInt(raw: string | undefined, fallback: number, max?: number): number {
-  if (raw === undefined) return fallback;
+  if (raw === undefined || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   const value = Math.floor(parsed);
@@ -389,17 +397,25 @@ export function parseAppDetailsCacheKey(
 
 export function selectEarlyAccessExperimentalValidateAppids(
   input: SelectEarlyAccessExperimentalValidateAppidsInput
-): number[] {
-  const validateBudget = Number.isFinite(input.validateBudget)
-    ? Math.max(0, Math.floor(input.validateBudget))
-    : 0;
-  if (validateBudget <= 0 || input.missingAppids.length === 0) return [];
+): SelectEarlyAccessExperimentalValidateAppidsResult {
+  const uncachedValidateBudget = input.uncachedValidateBudget ?? input.validateBudget ?? 0;
+  const uncachedLimit = input.unboundedUncachedValidation
+    ? Number.POSITIVE_INFINITY
+    : Number.isFinite(uncachedValidateBudget)
+      ? Math.max(0, Math.floor(uncachedValidateBudget))
+      : 0;
 
   const missingSet = new Set<number>();
   for (const appid of input.missingAppids) {
     if (isPositiveAppid(appid)) missingSet.add(appid);
   }
-  if (missingSet.size === 0) return [];
+
+  const empty: SelectEarlyAccessExperimentalValidateAppidsResult = {
+    cachedAppids: [],
+    uncachedAppids: [],
+    appids: [],
+  };
+  if (missingSet.size === 0) return empty;
 
   const preferredStoreCc = normalizeSteamStoreCc(input.preferredStoreCc);
   const cachedCandidates = (input.cachedAppids ?? []).filter((candidate) => {
@@ -418,24 +434,30 @@ export function selectEarlyAccessExperimentalValidateAppids(
     return a.appid - b.appid;
   });
 
-  const selectedAppids: number[] = [];
+  const cachedAppids: number[] = [];
+  const uncachedAppids: number[] = [];
   const selected = new Set<number>();
 
   for (const candidate of cachedCandidates) {
-    if (selectedAppids.length >= validateBudget) break;
     if (selected.has(candidate.appid)) continue;
     selected.add(candidate.appid);
-    selectedAppids.push(candidate.appid);
+    cachedAppids.push(candidate.appid);
   }
 
-  for (const appid of input.missingAppids) {
-    if (selectedAppids.length >= validateBudget) break;
-    if (!isPositiveAppid(appid) || selected.has(appid)) continue;
-    selected.add(appid);
-    selectedAppids.push(appid);
+  if (uncachedLimit > 0) {
+    for (const appid of input.missingAppids) {
+      if (uncachedAppids.length >= uncachedLimit) break;
+      if (!isPositiveAppid(appid) || selected.has(appid)) continue;
+      selected.add(appid);
+      uncachedAppids.push(appid);
+    }
   }
 
-  return selectedAppids;
+  return {
+    cachedAppids,
+    uncachedAppids,
+    appids: [...cachedAppids, ...uncachedAppids],
+  };
 }
 
 export function earlyAccessCatalogCacheKey(value?: string | null): string {
@@ -753,5 +775,26 @@ export function normalizeEarlyAccessGame(
     name: value.name?.trim() || `Steam App ${value.appid}`,
     steamUrl: `https://store.steampowered.com/app/${value.appid}/`,
     playtimeForever: Number.isFinite(value.playtime_forever) ? Math.max(0, Math.floor(value.playtime_forever as number)) : 0,
+  };
+}
+
+export function earlyAccessGameToUpcoming(game: EarlyAccessGame): UpcomingGame {
+  return {
+    appid: game.appid,
+    name: game.name,
+    headerImage: game.headerImage,
+    sources: ["library"],
+    releaseDate: game.releaseDate ?? null,
+    releaseYear: game.releaseYear,
+    dateSource: game.releaseDate
+      ? "steam"
+      : typeof game.releaseYear === "number"
+        ? "steamYear"
+        : "unknown",
+    steamUrl: game.steamUrl,
+    steamType: game.steamType,
+    isFree: game.isFree,
+    playtimeForever: game.playtimeForever,
+    price: game.price,
   };
 }

@@ -1,6 +1,5 @@
 import "server-only";
 import { cacheGet, cacheSet, listCacheEntriesByExactOrPrefix } from "./cache-store";
-import { loadWithCacheAndDedupe } from "./cached-dedupe.ts";
 import {
   applyEarlyAccessAppDetails,
   createEarlyAccessCatalogStatus,
@@ -44,6 +43,7 @@ import {
   type EarlyAccessGame,
   type EarlyAccessIndexMetaRow,
   type EarlyAccessLookupResult,
+  type EarlyAccessSearchPage,
   type EarlyAccessSessionResult,
 } from "./early-access-core.ts";
 import { keyHash } from "./key-hash.ts";
@@ -55,7 +55,8 @@ import type { SteamSession } from "./types";
 
 const EARLY_ACCESS_OWNED_TTL_MS = 10 * 60 * 1000;
 const EARLY_ACCESS_PARTIAL_TTL_MS = 6 * 60 * 60 * 1000;
-const EARLY_ACCESS_DETAILS_MAX = 80;
+const EARLY_ACCESS_PROGRESS_TTL_MS = 2 * 60 * 1000;
+const EARLY_ACCESS_VALIDATE_CHUNK = 20;
 const COVERAGE_WARNINGS = new Set([
   "early_access_index_empty",
   "early_access_index_partial",
@@ -64,11 +65,16 @@ const COVERAGE_WARNINGS = new Set([
 ]);
 const pendingCatalogStatuses = new Map<string, Promise<EarlyAccessCatalogStatus>>();
 const pendingSessionResults = new Map<string, Promise<EarlyAccessSessionResult>>();
+const sessionProgressResults = new Map<string, EarlyAccessSessionResult>();
 
 export interface EarlyAccessFetchOptions {
   refresh?: boolean;
   full?: boolean;
   pages?: number | null | undefined;
+}
+
+interface EarlyAccessBuildOptions extends EarlyAccessFetchOptions {
+  onProgress?: (result: EarlyAccessSessionResult) => Promise<void> | void;
 }
 
 export interface EarlyAccessLookupOptions extends EarlyAccessFetchOptions {
@@ -204,9 +210,44 @@ async function fetchEarlyAccessCatalog(
   let totalKnown: number | undefined;
   let lastItemCount: number | undefined;
 
+  async function persistProgressStatus(): Promise<void> {
+    if (pagesFetched <= 0) return;
+
+    const progressMeta = await getStatementRow<EarlyAccessIndexMetaRow>(
+      EARLY_ACCESS_META_SQL,
+      storeCc
+    );
+    const progressIndexedCount = Number.isFinite(Number(progressMeta?.appid_count))
+      ? Number(progressMeta?.appid_count)
+      : dbBefore.indexedCount + inserted;
+    const progressCheckedAt = Number.isFinite(Number(progressMeta?.checked_at))
+      ? Number(progressMeta?.checked_at)
+      : checkedAt;
+
+    await persistEarlyAccessCatalogStatus(
+      createEarlyAccessCatalogStatus({
+        storeCc,
+        indexedCount: progressIndexedCount,
+        checkedAt: progressCheckedAt,
+        pagesFetched,
+        totalKnown,
+        complete: false,
+        warnings: [...warnings],
+      })
+    );
+  }
+
   for (let pageIndex = 0; pageIndex < maxPages; pageIndex += 1) {
     const url = earlyAccessSearchUrl(storeCc, start, pageSize, { sort, infinite: true });
-    const parsed = parseEarlyAccessSearchPage(await searchJson(url));
+
+    let parsed: EarlyAccessSearchPage;
+    try {
+      parsed = parseEarlyAccessSearchPage(await searchJson(url));
+    } catch (error) {
+      await persistProgressStatus();
+      throw error;
+    }
+
     pagesFetched += 1;
     lastItemCount = parsed.itemCount;
 
@@ -233,6 +274,8 @@ async function fetchEarlyAccessCatalog(
         inserted,
       });
     }
+
+    await persistProgressStatus();
 
     if (
       !shouldFetchNextEarlyAccessPage({
@@ -487,6 +530,101 @@ function earlyAccessSessionCacheKey(
   }`;
 }
 
+function earlyAccessSessionProgressCacheKey(cacheKey: string): string {
+  return `${cacheKey}:progress`;
+}
+
+function sortEarlyAccessGames(games: EarlyAccessGame[]): EarlyAccessGame[] {
+  return [...games].sort((a, b) => {
+    const playtime = (b.playtimeForever ?? 0) - (a.playtimeForever ?? 0);
+    if (playtime !== 0) return playtime;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function createInProgressSessionResult(input: {
+  storeCc: string;
+  games?: EarlyAccessGame[];
+  indexedCount?: number;
+  checkedAt?: number;
+  totalKnown?: number;
+  partial?: boolean;
+  warnings?: string[];
+}): EarlyAccessSessionResult {
+  return {
+    ready: false,
+    reason: "in_progress",
+    storeCc: input.storeCc,
+    games: sortEarlyAccessGames(input.games ?? []),
+    indexedCount: input.indexedCount ?? 0,
+    checkedAt: input.checkedAt ?? 0,
+    totalKnown: input.totalKnown,
+    partial: input.partial ?? true,
+    warnings: input.warnings ?? [],
+  };
+}
+
+type EarlyAccessSessionAuth =
+  | { ok: false; result: EarlyAccessSessionResult }
+  | { ok: true; steamId: string; apiKey: string; storeCc: string };
+
+function sessionAuthResult(session: SteamSession | null): EarlyAccessSessionAuth {
+  const storeCc = earlyAccessStoreCc(session?.storeCc);
+  const steamId = session?.steamId;
+  if (!steamId) {
+    return {
+      ok: false,
+      result: {
+        ready: false,
+        reason: "signed_out",
+        storeCc,
+        games: [],
+        indexedCount: 0,
+        checkedAt: 0,
+        partial: false,
+        warnings: ["signed_out"],
+      },
+    };
+  }
+
+  const apiKey = session?.apiKey;
+  if (!apiKey) {
+    return {
+      ok: false,
+      result: {
+        ready: false,
+        reason: "no_api_key",
+        storeCc,
+        games: [],
+        indexedCount: 0,
+        checkedAt: 0,
+        partial: false,
+        warnings: ["missing_steam_api_key"],
+      },
+    };
+  }
+
+  return { ok: true, storeCc, steamId, apiKey };
+}
+
+async function publishSessionProgress(
+  cacheKey: string,
+  result: EarlyAccessSessionResult
+): Promise<void> {
+  sessionProgressResults.set(cacheKey, result);
+  await cacheSet(earlyAccessSessionProgressCacheKey(cacheKey), result, EARLY_ACCESS_PROGRESS_TTL_MS);
+}
+
+async function readSessionProgress(cacheKey: string): Promise<EarlyAccessSessionResult | undefined> {
+  return (
+    sessionProgressResults.get(cacheKey) ??
+    (await cacheGet<EarlyAccessSessionResult>(earlyAccessSessionProgressCacheKey(cacheKey)))
+  );
+}
+
+function clearSessionProgress(cacheKey: string): void {
+  sessionProgressResults.delete(cacheKey);
+}
 
 async function buildEarlyAccessSessionResult(
   session: {
@@ -496,8 +634,35 @@ async function buildEarlyAccessSessionResult(
     experimentalEarlyAccess?: boolean;
   },
   storeCc: string,
-  options: EarlyAccessFetchOptions
+  options: EarlyAccessBuildOptions
 ): Promise<EarlyAccessSessionResult> {
+  const publish = async (
+    games: EarlyAccessGame[],
+    status: EarlyAccessCatalogStatus,
+    warnings: Iterable<string>
+  ): Promise<void> => {
+    if (!options.onProgress) return;
+    await options.onProgress(
+      createInProgressSessionResult({
+        storeCc,
+        games,
+        indexedCount: status.indexedCount,
+        checkedAt: status.checkedAt,
+        totalKnown: status.totalKnown,
+        partial: status.partial,
+        warnings: [...warnings],
+      })
+    );
+  };
+
+  await publish([], createEarlyAccessCatalogStatus({
+    storeCc,
+    indexedCount: 0,
+    checkedAt: 0,
+    pagesFetched: 0,
+    complete: false,
+  }), []);
+
   let status = await ensureEarlyAccessCatalog(storeCc, options);
 
   if (!status.ready) {
@@ -567,7 +732,7 @@ async function buildEarlyAccessSessionResult(
   const warnings = new Set<string>(status.warnings);
 
   if (initialGames.length > 0) {
-    const detailAppids = initialGames.slice(0, EARLY_ACCESS_DETAILS_MAX).map((game) => game.appid);
+    const detailAppids = initialGames.map((game) => game.appid);
     try {
       const detailsById = await getAppDetails(detailAppids, {
         priority: "low",
@@ -614,10 +779,11 @@ async function buildEarlyAccessSessionResult(
       });
       confirmedGames.push(...initialGames);
     }
+
+    await publish(confirmedGames, status, warnings);
   }
 
   if (experimentalEarlyAccess) {
-    const confirmedInitialAppids = new Set(confirmedGames.map((game) => game.appid));
     const missingOwnedAppids = [...new Set(ownedGames
       .filter((game) => !knownAppids.has(game.appid))
       .map((game) => game.appid))].sort((a, b) => {
@@ -626,68 +792,81 @@ async function buildEarlyAccessSessionResult(
       if (timeB !== timeA) return timeB - timeA;
       return b - a;
     });
-    const validateMax = earlyAccessLookupValidateMax();
-    const validateBudget = Math.max(0, validateMax - confirmedInitialAppids.size);
     const cachedConfirmedAppids = await loadCachedConfirmedEarlyAccessAppids(
       missingOwnedAppids
     );
-    const missingValidateAppids = selectEarlyAccessExperimentalValidateAppids({
+    const experimentalCandidates = selectEarlyAccessExperimentalValidateAppids({
       missingAppids: missingOwnedAppids,
       cachedAppids: cachedConfirmedAppids,
-      validateBudget,
+      uncachedValidateBudget: Number.POSITIVE_INFINITY,
+      unboundedUncachedValidation: true,
       preferredStoreCc: storeCc,
     });
-
-    if (missingOwnedAppids.length > missingValidateAppids.length) {
-      warnings.add("early_access_experimental_validation_partial");
-    }
+    const missingValidateAppids = experimentalCandidates.appids;
 
     if (missingValidateAppids.length > 0) {
-      try {
-        const detailsById = await getAppDetails(missingValidateAppids, {
-          priority: "low",
-          storeCc,
-          steamId: session.steamId,
-        });
-        const confirmedAppids: number[] = [];
+      let validatedCount = 0;
+      let savedCount = 0;
 
-        for (const appid of missingValidateAppids) {
-          if (isEarlyAccessConfirmedAppDetails(detailsById.get(appid)) === true) {
-            confirmedAppids.push(appid);
+      try {
+        for (let offset = 0; offset < missingValidateAppids.length; offset += EARLY_ACCESS_VALIDATE_CHUNK) {
+          const chunk = missingValidateAppids.slice(offset, offset + EARLY_ACCESS_VALIDATE_CHUNK);
+          const detailsById = await getAppDetails(chunk, {
+            priority: "low",
+            storeCc,
+            steamId: session.steamId,
+          });
+          const confirmedAppids: number[] = [];
+
+          for (const appid of chunk) {
+            if (isEarlyAccessConfirmedAppDetails(detailsById.get(appid)) === true) {
+              confirmedAppids.push(appid);
+            }
+          }
+
+          if (confirmedAppids.length > 0) {
+            const globalWrite = await storeGlobalEarlyAccessAppIds(storeCc, confirmedAppids);
+            if (globalWrite.failed > 0) warnings.add("early_access_global_sql_write_failed");
+            if (globalWrite.saved > 0) {
+              warnings.add("early_access_catalog_backfilled");
+              status = await refreshCatalogStatusAfterGlobalBackfill(storeCc);
+              syncCoverageWarnings(warnings, status);
+            }
+
+            const write = await storeExperimentalEarlyAccessAppIds(
+              session.steamId,
+              storeCc,
+              confirmedAppids
+            );
+            if (write.failed > 0) warnings.add("early_access_experimental_sql_write_failed");
+            if (write.saved > 0) {
+              warnings.add("early_access_experimental_validated");
+              validatedCount += confirmedAppids.length;
+              savedCount += write.saved;
+            }
+
+            for (const appid of confirmedAppids) {
+              knownAppids.add(appid);
+              const ownedGame = ownedByAppid.get(appid);
+              if (!ownedGame) continue;
+              confirmedGames.push(
+                applyEarlyAccessAppDetails(
+                  normalizeEarlyAccessGame(ownedGame),
+                  detailsById.get(appid)
+                )
+              );
+            }
+
+            await publish(confirmedGames, status, warnings);
           }
         }
 
-        if (confirmedAppids.length > 0) {
-          const globalWrite = await storeGlobalEarlyAccessAppIds(storeCc, confirmedAppids);
-          if (globalWrite.failed > 0) warnings.add("early_access_global_sql_write_failed");
-          if (globalWrite.saved > 0) {
-            warnings.add("early_access_catalog_backfilled");
-            status = await refreshCatalogStatusAfterGlobalBackfill(storeCc);
-            syncCoverageWarnings(warnings, status);
-          }
-
-          const write = await storeExperimentalEarlyAccessAppIds(session.steamId, storeCc, confirmedAppids);
-          if (write.failed > 0) warnings.add("early_access_experimental_sql_write_failed");
-          if (write.saved > 0) {
-            warnings.add("early_access_experimental_validated");
-            logDebug("earlyAccess.session.experimentalValidated", {
-              storeCc,
-              validatedCount: confirmedAppids.length,
-              savedCount: write.saved,
-            });
-          }
-
-          for (const appid of confirmedAppids) {
-            knownAppids.add(appid);
-            const ownedGame = ownedByAppid.get(appid);
-            if (!ownedGame) continue;
-            confirmedGames.push(
-              applyEarlyAccessAppDetails(
-                normalizeEarlyAccessGame(ownedGame),
-                detailsById.get(appid)
-              )
-            );
-          }
+        if (validatedCount > 0) {
+          logDebug("earlyAccess.session.experimentalValidated", {
+            storeCc,
+            validatedCount,
+            savedCount,
+          });
         }
       } catch (error) {
         warnings.add("early_access_details_failed");
@@ -700,16 +879,10 @@ async function buildEarlyAccessSessionResult(
     }
   }
 
-  confirmedGames.sort((a, b) => {
-    const playtime = (b.playtimeForever ?? 0) - (a.playtimeForever ?? 0);
-    if (playtime !== 0) return playtime;
-    return a.name.localeCompare(b.name);
-  });
-
   return {
     ready: true,
     storeCc,
-    games: confirmedGames,
+    games: sortEarlyAccessGames(confirmedGames),
     indexedCount: status.indexedCount,
     checkedAt: status.checkedAt,
     totalKnown: status.totalKnown,
@@ -718,75 +891,132 @@ async function buildEarlyAccessSessionResult(
   };
 }
 
-export async function getEarlyAccessSessionResult(
-  session: SteamSession | null,
-  options: EarlyAccessFetchOptions = {}
+function startEarlyAccessSessionBuild(
+  cacheKey: string,
+  session: {
+    steamId: string;
+    apiKey: string;
+    storeCc?: string | null;
+    experimentalEarlyAccess?: boolean;
+  },
+  storeCc: string,
+  options: EarlyAccessFetchOptions
 ): Promise<EarlyAccessSessionResult> {
-  const storeCc = earlyAccessStoreCc(session?.storeCc);
-  const steamId = session?.steamId;
-  const apiKey = session?.apiKey;
-
-  if (!steamId) {
-    return {
-      ready: false,
-      reason: "signed_out",
-      storeCc,
-      games: [],
-      indexedCount: 0,
-      checkedAt: 0,
-      partial: false,
-      warnings: ["signed_out"],
-    };
-  }
-
-  if (!apiKey) {
-    return {
-      ready: false,
-      reason: "no_api_key",
-      storeCc,
-      games: [],
-      indexedCount: 0,
-      checkedAt: 0,
-      partial: false,
-      warnings: ["missing_steam_api_key"],
-    };
-  }
-
-  const experimentalEarlyAccess = Boolean(session.experimentalEarlyAccess);
-  const cacheKey = earlyAccessSessionCacheKey(steamId, apiKey, storeCc, experimentalEarlyAccess);
-  if (!options.refresh) {
-    return loadWithCacheAndDedupe({
-      cacheKey,
-      pending: pendingSessionResults,
-      cacheGet,
-      cacheSet,
-      factory: () =>
-        buildEarlyAccessSessionResult(
-          { steamId, apiKey, storeCc, experimentalEarlyAccess },
-          storeCc,
-          options
-        ),
-      ttlMs: EARLY_ACCESS_OWNED_TTL_MS,
-    });
-  }
-
   const inflight = pendingSessionResults.get(cacheKey);
   if (inflight) return inflight;
 
   const promise = (async () => {
-    const result = await buildEarlyAccessSessionResult(
-      { steamId, apiKey, storeCc, experimentalEarlyAccess },
-      storeCc,
-      options
-    );
-    await cacheSet(cacheKey, result, EARLY_ACCESS_OWNED_TTL_MS);
-    return result;
-  })().finally(() => {
-    pendingSessionResults.delete(cacheKey);
-  });
+    try {
+      const result = await buildEarlyAccessSessionResult(session, storeCc, {
+        ...options,
+        onProgress: (partial) => publishSessionProgress(cacheKey, partial),
+      });
+      await cacheSet(cacheKey, result, EARLY_ACCESS_OWNED_TTL_MS);
+      clearSessionProgress(cacheKey);
+      return result;
+    } catch (error) {
+      const failed: EarlyAccessSessionResult = {
+        ready: false,
+        reason: "error",
+        storeCc,
+        games: sessionProgressResults.get(cacheKey)?.games ?? [],
+        indexedCount: sessionProgressResults.get(cacheKey)?.indexedCount ?? 0,
+        checkedAt: sessionProgressResults.get(cacheKey)?.checkedAt ?? 0,
+        totalKnown: sessionProgressResults.get(cacheKey)?.totalKnown,
+        partial: true,
+        warnings: ["early_access_session_failed"],
+      };
+      await cacheSet(cacheKey, failed, EARLY_ACCESS_NEGATIVE_TTL_MS);
+      clearSessionProgress(cacheKey);
+      logDebug("earlyAccess.session.failed", {
+        storeCc,
+        error: sanitizeDebugError(error),
+      });
+      return failed;
+    } finally {
+      pendingSessionResults.delete(cacheKey);
+    }
+  })();
 
   pendingSessionResults.set(cacheKey, promise);
   return promise;
+}
+
+export async function getEarlyAccessSessionSnapshot(
+  session: SteamSession | null,
+  options: EarlyAccessFetchOptions = {}
+): Promise<EarlyAccessSessionResult> {
+  const auth = sessionAuthResult(session);
+  if (!auth.ok) return auth.result;
+
+  const experimentalEarlyAccess = Boolean(session?.experimentalEarlyAccess);
+  const cacheKey = earlyAccessSessionCacheKey(
+    auth.steamId,
+    auth.apiKey,
+    auth.storeCc,
+    experimentalEarlyAccess
+  );
+
+  if (!options.refresh) {
+    const cached = await cacheGet<EarlyAccessSessionResult>(cacheKey);
+    if (cached) {
+      if (cached.ready) return cached;
+      if (cached.reason && cached.reason !== "in_progress") return cached;
+    }
+  }
+
+  void startEarlyAccessSessionBuild(
+    cacheKey,
+    {
+      steamId: auth.steamId,
+      apiKey: auth.apiKey,
+      storeCc: auth.storeCc,
+      experimentalEarlyAccess,
+    },
+    auth.storeCc,
+    options
+  ).catch(() => undefined);
+
+  const progress = await readSessionProgress(cacheKey);
+  if (progress) return progress;
+
+  return createInProgressSessionResult({ storeCc: auth.storeCc });
+}
+
+export async function getEarlyAccessSessionResult(
+  session: SteamSession | null,
+  options: EarlyAccessFetchOptions = {}
+): Promise<EarlyAccessSessionResult> {
+  const auth = sessionAuthResult(session);
+  if (!auth.ok) return auth.result;
+
+  const experimentalEarlyAccess = Boolean(session?.experimentalEarlyAccess);
+  const cacheKey = earlyAccessSessionCacheKey(
+    auth.steamId,
+    auth.apiKey,
+    auth.storeCc,
+    experimentalEarlyAccess
+  );
+
+  if (!options.refresh) {
+    const cached = await cacheGet<EarlyAccessSessionResult>(cacheKey);
+    if (cached) {
+      if (cached.ready) return cached;
+      if (cached.reason && cached.reason !== "in_progress") return cached;
+    }
+  }
+
+  return startEarlyAccessSessionBuild(
+    cacheKey,
+    {
+      steamId: auth.steamId,
+      apiKey: auth.apiKey,
+      storeCc: auth.storeCc,
+      experimentalEarlyAccess,
+    },
+    auth.storeCc,
+    options
+  );
 }
 
 export async function lookupEarlyAccessAppIds(
@@ -855,42 +1085,61 @@ export async function lookupEarlyAccessAppIds(
   const warnings = new Set<string>(status.warnings);
   const matchedAppids = requestedAppids.filter((appid) => knownAppids.has(appid));
   const missingAppids = requestedAppids.filter((appid) => !knownAppids.has(appid));
-  const validateMax = earlyAccessLookupValidateMax();
-  const validateBudget = experimentalEarlyAccess
-    ? Math.max(0, validateMax - matchedAppids.length)
-    : 0;
+  const validateMax = experimentalEarlyAccess
+    ? Number.POSITIVE_INFINITY
+    : earlyAccessLookupValidateMax();
+  const uncachedValidateBudget = experimentalEarlyAccess ? Number.POSITIVE_INFINITY : 0;
   const cachedConfirmedAppids =
-    validateBudget > 0 && missingAppids.length > 0
+    experimentalEarlyAccess && missingAppids.length > 0
       ? await loadCachedConfirmedEarlyAccessAppids(missingAppids)
       : [];
-  const missingValidateAppids = selectEarlyAccessExperimentalValidateAppids({
+  const lookupCandidates = selectEarlyAccessExperimentalValidateAppids({
     missingAppids,
     cachedAppids: cachedConfirmedAppids,
-    validateBudget,
+    uncachedValidateBudget,
+    unboundedUncachedValidation: experimentalEarlyAccess,
     preferredStoreCc: storeCc,
   });
-  const candidates = [...matchedAppids, ...missingValidateAppids];
-  const validationSkipped = candidates.length > validateMax;
+  const missingValidateAppids = lookupCandidates.appids;
+  const validatedSet = new Set<number>(matchedAppids);
   let validatedAppids = matchedAppids;
+  const confirmedGenreBypassAppids: number[] = [];
+  const matchedValidationSkipped = matchedAppids.length > validateMax;
 
-  if (
-    experimentalEarlyAccess &&
-    missingAppids.length > 0 &&
-    missingValidateAppids.length < missingAppids.length
-  ) {
-    warnings.add("early_access_lookup_validation_partial");
+  if (missingValidateAppids.length > 0) {
+    try {
+      const detailsById = await getAppDetails(missingValidateAppids, {
+        priority: "low",
+        storeCc,
+        steamId: options.steamId ?? undefined,
+      });
+
+      for (const appid of missingValidateAppids) {
+        if (isEarlyAccessConfirmedAppDetails(detailsById.get(appid)) === true) {
+          validatedSet.add(appid);
+          confirmedGenreBypassAppids.push(appid);
+        }
+      }
+    } catch (error) {
+      warnings.add("early_access_details_failed");
+      logDebug("earlyAccess.lookup.missingAppDetails.failed", {
+        appidCount: missingValidateAppids.length,
+        storeCc,
+        error: sanitizeDebugError(error),
+      });
+    }
   }
 
-  if (candidates.length > 0) {
-    if (!validationSkipped) {
+  if (matchedAppids.length > 0) {
+    if (matchedValidationSkipped) {
+      warnings.add("early_access_lookup_validation_skipped");
+    } else {
       try {
-        const detailsById = await getAppDetails(candidates, {
+        const detailsById = await getAppDetails(matchedAppids, {
           priority: "low",
           storeCc,
           steamId: options.steamId ?? undefined,
         });
-        const validatedSet = new Set<number>();
-        const confirmedGenreBypassAppids: number[] = [];
         let confirmedMatchedCount = 0;
         let experimentalStaleFilteredCount = 0;
 
@@ -899,23 +1148,17 @@ export async function lookupEarlyAccessAppIds(
           if (confirmed === false && experimentalAppids.has(appid)) {
             experimentalStaleFilteredCount += 1;
             await deleteExperimentalEarlyAccessAppId(options.steamId, storeCc, appid);
+            validatedSet.delete(appid);
             continue;
           }
 
           if (confirmed !== false) {
             validatedSet.add(appid);
             confirmedMatchedCount += 1;
+          } else {
+            validatedSet.delete(appid);
           }
         }
-
-        for (const appid of missingValidateAppids) {
-          if (isEarlyAccessConfirmedAppDetails(detailsById.get(appid)) === true) {
-            validatedSet.add(appid);
-            confirmedGenreBypassAppids.push(appid);
-          }
-        }
-
-        validatedAppids = requestedAppids.filter((appid) => validatedSet.has(appid));
 
         const filteredCount = matchedAppids.length - confirmedMatchedCount;
         if (filteredCount > 0) {
@@ -933,49 +1176,49 @@ export async function lookupEarlyAccessAppIds(
             filteredCount: experimentalStaleFilteredCount,
           });
         }
-
-        if (confirmedGenreBypassAppids.length > 0) {
-          warnings.add("early_access_genre_validated");
-          logDebug("earlyAccess.lookup.genreBypass", {
-            storeCc,
-            genreBypassCount: confirmedGenreBypassAppids.length,
-          });
-
-          const globalWrite = await storeGlobalEarlyAccessAppIds(storeCc, confirmedGenreBypassAppids);
-          if (globalWrite.failed > 0) warnings.add("early_access_global_sql_write_failed");
-          if (globalWrite.saved > 0) {
-            warnings.add("early_access_catalog_backfilled");
-            status = await refreshCatalogStatusAfterGlobalBackfill(storeCc);
-            syncCoverageWarnings(warnings, status);
-          }
-
-          if (experimentalEarlyAccess && options.steamId) {
-            const write = await storeExperimentalEarlyAccessAppIds(
-              options.steamId,
-              storeCc,
-              confirmedGenreBypassAppids
-            );
-            if (write.failed > 0) warnings.add("early_access_experimental_sql_write_failed");
-            if (write.saved > 0) {
-              warnings.add("early_access_experimental_validated");
-              logDebug("earlyAccess.lookup.experimentalValidated", {
-                storeCc,
-                validatedCount: confirmedGenreBypassAppids.length,
-                savedCount: write.saved,
-              });
-            }
-          }
-        }
       } catch (error) {
         warnings.add("early_access_details_failed");
         logDebug("earlyAccess.lookup.appDetails.failed", {
-          appidCount: candidates.length,
+          appidCount: matchedAppids.length,
           storeCc,
           error: sanitizeDebugError(error),
         });
       }
-    } else {
-      warnings.add("early_access_lookup_validation_skipped");
+    }
+  }
+
+  validatedAppids = requestedAppids.filter((appid) => validatedSet.has(appid));
+
+  if (confirmedGenreBypassAppids.length > 0) {
+    warnings.add("early_access_genre_validated");
+    logDebug("earlyAccess.lookup.genreBypass", {
+      storeCc,
+      genreBypassCount: confirmedGenreBypassAppids.length,
+    });
+
+    const globalWrite = await storeGlobalEarlyAccessAppIds(storeCc, confirmedGenreBypassAppids);
+    if (globalWrite.failed > 0) warnings.add("early_access_global_sql_write_failed");
+    if (globalWrite.saved > 0) {
+      warnings.add("early_access_catalog_backfilled");
+      status = await refreshCatalogStatusAfterGlobalBackfill(storeCc);
+      syncCoverageWarnings(warnings, status);
+    }
+
+    if (experimentalEarlyAccess && options.steamId) {
+      const write = await storeExperimentalEarlyAccessAppIds(
+        options.steamId,
+        storeCc,
+        confirmedGenreBypassAppids
+      );
+      if (write.failed > 0) warnings.add("early_access_experimental_sql_write_failed");
+      if (write.saved > 0) {
+        warnings.add("early_access_experimental_validated");
+        logDebug("earlyAccess.lookup.experimentalValidated", {
+          storeCc,
+          validatedCount: confirmedGenreBypassAppids.length,
+          savedCount: write.saved,
+        });
+      }
     }
   }
 

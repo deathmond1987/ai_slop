@@ -1005,6 +1005,10 @@ body:has(.onboarding-page) .settings-remove-btn:hover {
 
 .calendar-side-tab-count {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: calc(1.25rem * var(--ui-scale));
   padding-left: calc(0.375rem * var(--ui-scale));
   border-left: 1px solid var(--side-tab-divider, rgba(24, 24, 27, 0.25));
   color: var(--side-tab-count-color, #52525b);
