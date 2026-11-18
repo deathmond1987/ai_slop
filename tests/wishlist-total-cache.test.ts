@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { register } from "node:module";
+import { resetSteamStoreRateLimitState } from "../lib/steam-rate-limit.ts";
 
 register(new URL("./ts-extension-resolver.mjs", import.meta.url).href, import.meta.url);
 
@@ -13,10 +14,14 @@ test("refreshing wishlist total removes stale wishlist candidates removed from S
   const originalDbSqlitePath = process.env.DB_SQLITE_PATH;
   const originalRawgApiKey = process.env.RAWG_API_KEY;
   const originalAppDetailsMinIntervalMs = process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS;
+  const originalSteamStoreRateLimitMaxRequests =
+    process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS;
 
   process.env.DB_SQLITE_PATH = path.join(tempDir, "cache.sqlite");
   delete process.env.RAWG_API_KEY;
   process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS = "0";
+  process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS = "0";
+  resetSteamStoreRateLimitState();
 
   globalThis.fetch = async (input: RequestInfo | URL) => {
     const url = new URL(String(input));
@@ -153,6 +158,13 @@ test("refreshing wishlist total removes stale wishlist candidates removed from S
     } else {
       process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS = originalAppDetailsMinIntervalMs;
     }
+
+    if (originalSteamStoreRateLimitMaxRequests === undefined) {
+      delete process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS;
+    } else {
+      process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS = originalSteamStoreRateLimitMaxRequests;
+    }
+    resetSteamStoreRateLimitState();
 
     rmSync(tempDir, { recursive: true, force: true });
   }

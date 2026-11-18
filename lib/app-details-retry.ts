@@ -5,6 +5,7 @@ import {
   steamAppDetailsRetryQueueMax,
   steamAppDetailsRetrySteamIdsMax,
 } from "./steam-core.ts";
+import { processSingleton } from "./process-singleton.ts";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
 
 export type AppDetailsRetryOutcome = "succeeded" | "retry" | "stop";
@@ -43,11 +44,6 @@ interface RetryEntry {
   nextRetryAtMs: number;
 }
 
-const retryEntries = new Map<string, RetryEntry>();
-let handlers: AppDetailsRetryHandlers = {};
-let timer: ReturnType<typeof setTimeout> | undefined;
-let stats = createStats();
-let running = false;
 
 function createStats(): AppDetailsRetryStats {
   return {
@@ -64,6 +60,15 @@ function createStats(): AppDetailsRetryStats {
     scheduled: false,
   };
 }
+
+const retryState = processSingleton("steam.appDetailsRetry", () => ({
+  entries: new Map<string, RetryEntry>(),
+  handlers: {} as AppDetailsRetryHandlers,
+  timer: undefined as ReturnType<typeof setTimeout> | undefined,
+  stats: createStats(),
+  running: false,
+}));
+const retryEntries = retryState.entries;
 
 function config() {
   return {
@@ -117,21 +122,21 @@ function uniqueSteamIds(): number {
 function refreshStats(): void {
   const cfg = config();
   const now = Date.now();
-  stats.configured = Boolean(handlers.retry);
-  stats.enabled = cfg.enabled;
-  stats.queued = retryEntries.size;
-  stats.due = 0;
+  retryState.stats.configured = Boolean(retryState.handlers.retry);
+  retryState.stats.enabled = cfg.enabled;
+  retryState.stats.queued = retryEntries.size;
+  retryState.stats.due = 0;
   for (const entry of retryEntries.values()) {
-    if (entry.nextRetryAtMs <= now) stats.due += 1;
+    if (entry.nextRetryAtMs <= now) retryState.stats.due += 1;
   }
-  stats.uniqueSteamIds = uniqueSteamIds();
-  stats.scheduled = timer !== undefined;
+  retryState.stats.uniqueSteamIds = uniqueSteamIds();
+  retryState.stats.scheduled = retryState.timer !== undefined;
 }
 
 function clearTimer(): void {
-  if (!timer) return;
-  clearTimeout(timer);
-  timer = undefined;
+  if (!retryState.timer) return;
+  clearTimeout(retryState.timer);
+  retryState.timer = undefined;
 }
 
 function nextDueAtMs(now: number): number | undefined {
@@ -156,25 +161,25 @@ function scheduleNext(): void {
     return;
   }
 
-  timer = setTimeout(() => {
-    timer = undefined;
+  retryState.timer = setTimeout(() => {
+    retryState.timer = undefined;
     void processAppDetailsRetries();
   }, waitMs);
-  timer.unref?.();
+  retryState.timer.unref?.();
   refreshStats();
 }
 
 export function configureAppDetailsRetry(nextHandlers: AppDetailsRetryHandlers): void {
-  handlers = { ...nextHandlers };
+  retryState.handlers = { ...nextHandlers };
   refreshStats();
 }
 
 export function resetAppDetailsRetry(): void {
   clearTimer();
   retryEntries.clear();
-  handlers = {};
-  running = false;
-  stats = createStats();
+  retryState.handlers = {};
+  retryState.running = false;
+  retryState.stats = createStats();
 }
 
 export function enqueueAppDetailsRetry(request: AppDetailsRetryRequest): boolean {
@@ -186,7 +191,7 @@ export function enqueueAppDetailsRetry(request: AppDetailsRetryRequest): boolean
 
   const entry = normalizeRequest(request);
   if (!entry) {
-    stats.dropped += 1;
+    retryState.stats.dropped += 1;
     refreshStats();
     return false;
   }
@@ -197,13 +202,13 @@ export function enqueueAppDetailsRetry(request: AppDetailsRetryRequest): boolean
   }
 
   if (retryEntries.size >= cfg.queueMax) {
-    stats.dropped += 1;
+    retryState.stats.dropped += 1;
     refreshStats();
     return false;
   }
 
   if (entry.steamId && uniqueSteamIds() >= cfg.steamIdsMax && !hasSteamId(entry.steamId)) {
-    stats.dropped += 1;
+    retryState.stats.dropped += 1;
     refreshStats();
     return false;
   }
@@ -223,7 +228,7 @@ function hasSteamId(steamId: string): boolean {
 
 export async function processAppDetailsRetries(now = Date.now()): Promise<number> {
   const cfg = config();
-  if (!cfg.enabled || !handlers.retry || running) {
+  if (!cfg.enabled || !retryState.handlers.retry || retryState.running) {
     refreshStats();
     return 0;
   }
@@ -234,30 +239,30 @@ export async function processAppDetailsRetries(now = Date.now()): Promise<number
     return 0;
   }
 
-  running = true;
+  retryState.running = true;
   let handled = 0;
 
   for (const entry of dueEntries) {
     if (!retryEntries.has(entry.key)) continue;
 
     entry.attempts += 1;
-    stats.attempts += 1;
+    retryState.stats.attempts += 1;
     const request = toRequest(entry);
     let outcome: AppDetailsRetryOutcome = "stop";
 
     try {
-      outcome = await handlers.retry(request);
+      outcome = await retryState.handlers.retry(request);
     } catch {
       outcome = "stop";
     }
 
     if (outcome === "succeeded") {
       retryEntries.delete(entry.key);
-      stats.succeeded += 1;
+      retryState.stats.succeeded += 1;
       handled += 1;
-      if (handlers.onSucceeded) {
+      if (retryState.handlers.onSucceeded) {
         try {
-          await handlers.onSucceeded(request);
+          await retryState.handlers.onSucceeded(request);
         } catch {
           // Cache invalidation is best-effort.
         }
@@ -267,22 +272,22 @@ export async function processAppDetailsRetries(now = Date.now()): Promise<number
 
     if (outcome === "retry" && entry.attempts < cfg.maxAttempts) {
       entry.nextRetryAtMs = now + cfg.delayMs * Math.min(entry.attempts, cfg.maxAttempts);
-      stats.retried += 1;
+      retryState.stats.retried += 1;
       handled += 1;
       continue;
     }
 
     retryEntries.delete(entry.key);
-    stats.stopped += 1;
+    retryState.stats.stopped += 1;
     handled += 1;
   }
 
-  running = false;
+  retryState.running = false;
   scheduleNext();
   return handled;
 }
 
 export function appDetailsRetryQueueStats(): AppDetailsRetryStats {
   refreshStats();
-  return { ...stats };
+  return { ...retryState.stats };
 }

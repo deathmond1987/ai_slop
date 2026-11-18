@@ -25,7 +25,23 @@ import {
   steamAppDetailsRetryQueueMax,
   steamAppDetailsRetrySteamIdsMax,
   steamAppDetailsTimeoutMs,
+  STEAM_STORE_RATE_LIMIT_COOLDOWN_MS,
+  STEAM_STORE_RATE_LIMIT_MAX_REQUESTS,
+  STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS,
+  STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS,
+  STEAM_STORE_RATE_LIMIT_WINDOW_MS,
+  steamStoreRateLimitCooldownMs,
+  steamStoreRateLimitEnabled,
+  steamStoreRateLimitMaxRequests,
+  steamStoreRateLimitMaxWaitMs,
+  steamStoreRateLimitMinIntervalMs,
+  steamStoreRateLimitWindowMs,
 } from "../lib/steam-core.ts";
+import {
+  EARLY_ACCESS_DEFAULT_DETAILS_MAX,
+  EARLY_ACCESS_DETAILS_MAX_LIMIT,
+  earlyAccessDetailsMax,
+} from "../lib/early-access-core.ts";
 import {
   WISHLIST_PAGE_FALLBACK_DEFAULT_ENABLED,
   shouldFetchWishlistPage,
@@ -150,6 +166,74 @@ test("Steam appdetails env overrides are bounded and parsed", () => {
       assert.equal(steamAppDetailsMinIntervalMs(), STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS);
     }
   );
+});
+
+test("Steam Store rate limit defaults are conservative", () => {
+  withEnv(
+    {
+      STEAM_STORE_RATE_LIMIT_MAX_REQUESTS: undefined,
+      STEAM_STORE_RATE_LIMIT_WINDOW_MS: undefined,
+      STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS: undefined,
+      STEAM_STORE_RATE_LIMIT_COOLDOWN_MS: undefined,
+      STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS: undefined,
+    },
+    () => {
+      assert.equal(steamStoreRateLimitMaxRequests(), STEAM_STORE_RATE_LIMIT_MAX_REQUESTS);
+      assert.equal(steamStoreRateLimitEnabled(), true);
+      assert.equal(steamStoreRateLimitWindowMs(), STEAM_STORE_RATE_LIMIT_WINDOW_MS);
+      assert.equal(steamStoreRateLimitMinIntervalMs(), STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS);
+      assert.equal(steamStoreRateLimitCooldownMs(), STEAM_STORE_RATE_LIMIT_COOLDOWN_MS);
+      assert.equal(steamStoreRateLimitMaxWaitMs(), STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS);
+    }
+  );
+});
+
+test("Steam Store rate limit env overrides are parsed and can disable pacing", () => {
+  withEnv(
+    {
+      STEAM_STORE_RATE_LIMIT_MAX_REQUESTS: "25",
+      STEAM_STORE_RATE_LIMIT_WINDOW_MS: "60000",
+      STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS: "2000",
+      STEAM_STORE_RATE_LIMIT_COOLDOWN_MS: "10000",
+      STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS: "1200",
+    },
+    () => {
+      assert.equal(steamStoreRateLimitMaxRequests(), 25);
+      assert.equal(steamStoreRateLimitEnabled(), true);
+      assert.equal(steamStoreRateLimitWindowMs(), 60000);
+      assert.equal(steamStoreRateLimitMinIntervalMs(), 2000);
+      assert.equal(steamStoreRateLimitCooldownMs(), 10000);
+      assert.equal(steamStoreRateLimitMaxWaitMs(), 1200);
+    }
+  );
+
+  withEnv(
+    {
+      STEAM_STORE_RATE_LIMIT_MAX_REQUESTS: "0",
+    },
+    () => {
+      assert.equal(steamStoreRateLimitMaxRequests(), 0);
+      assert.equal(steamStoreRateLimitEnabled(), false);
+    }
+  );
+});
+
+test("early access details max restores a finite bounded default", () => {
+  withEnv({ EARLY_ACCESS_DETAILS_MAX: undefined }, () => {
+    assert.equal(earlyAccessDetailsMax(), EARLY_ACCESS_DEFAULT_DETAILS_MAX);
+  });
+
+  withEnv({ EARLY_ACCESS_DETAILS_MAX: "120" }, () => {
+    assert.equal(earlyAccessDetailsMax(), 120);
+  });
+
+  withEnv({ EARLY_ACCESS_DETAILS_MAX: String(EARLY_ACCESS_DETAILS_MAX_LIMIT + 1) }, () => {
+    assert.equal(earlyAccessDetailsMax(), EARLY_ACCESS_DETAILS_MAX_LIMIT);
+  });
+
+  withEnv({ EARLY_ACCESS_DETAILS_MAX: "0" }, () => {
+    assert.equal(earlyAccessDetailsMax(), EARLY_ACCESS_DEFAULT_DETAILS_MAX);
+  });
 });
 
 test("wishlist page fetch defaults to fallback only when JSON API is not usable", () => {

@@ -1,3 +1,4 @@
+import { processSingleton } from "./process-singleton.ts";
 import "server-only";
 import type { IdentifiedSession, UpcomingGame } from "./types";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
@@ -37,7 +38,7 @@ export interface UpcomingResult {
   wishlistStatus?: WishlistResultStatus;
 }
 
-const pendingUpcoming = new Map<string, Promise<UpcomingResult>>();
+const pendingUpcoming = processSingleton("pendingUpcoming", () => new Map<string, Promise<UpcomingResult>>());
 const MAX_EARLY_OWNED_DETAIL_PREFETCH = 30;
 const TRANSIENT_UPCOMING_TTL_MS = 30_000;
 

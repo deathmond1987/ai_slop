@@ -1,3 +1,4 @@
+import { processSingleton } from "./process-singleton.ts";
 import "server-only";
 import { cacheGet, cacheSet } from "./cache-store";
 import { logDebug, sanitizeDebugError } from "./debug";
@@ -10,7 +11,7 @@ import {
 import type { RawgHit } from "./types";
 
 const BASE = "https://api.rawg.io/api";
-const pendingRawg = new Map<string, Promise<RawgHit | null>>();
+const pendingRawg = processSingleton("pendingRawg", () => new Map<string, Promise<RawgHit | null>>());
 
 interface RawgPlatformEntry {
   platform?: { name?: string };

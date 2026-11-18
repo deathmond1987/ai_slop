@@ -1,3 +1,4 @@
+import { processSingleton } from "./process-singleton.ts";
 import "server-only";
 import { getAppDetails } from "./steam";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
@@ -233,7 +234,7 @@ async function finalizeApiWishlist(
   });
 }
 
-const pendingWishlist = new Map<string, Promise<WishlistResult>>();
+const pendingWishlist = processSingleton("pendingWishlist", () => new Map<string, Promise<WishlistResult>>());
 
 function getCachedWishlist(steamId: string, storeCcHash?: string): Promise<WishlistResult | undefined> {
   return cacheGet<WishlistResult>(wishlistCacheKey(steamId, storeCcHash));

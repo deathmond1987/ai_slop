@@ -31,6 +31,17 @@ export const STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS = 2;
 export const STEAM_APPDETAILS_RETRY_QUEUE_MAX = 500;
 export const STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX = 20;
 
+export const STEAM_STORE_RATE_LIMIT_MAX_REQUESTS = 300;
+export const STEAM_STORE_RATE_LIMIT_MAX_REQUESTS_MAX = 1000;
+export const STEAM_STORE_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+export const STEAM_STORE_RATE_LIMIT_WINDOW_MAX_MS = 30 * 60 * 1000;
+export const STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS = 200;
+export const STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MAX_MS = 30000;
+export const STEAM_STORE_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+export const STEAM_STORE_RATE_LIMIT_COOLDOWN_MAX_MS = 30 * 60 * 1000;
+export const STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS = 15000;
+export const STEAM_STORE_RATE_LIMIT_MAX_WAIT_MAX_MS = 30000;
+
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -38,7 +49,7 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 function parseNonNegativeInt(value: string | undefined, fallback: number): number {
-  if (value === undefined) return fallback;
+  if (value === undefined || value.trim() === "") return fallback;
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return Math.round(parsed);
@@ -111,6 +122,50 @@ export function steamAppDetailsRetrySteamIdsMax(): number {
     STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX
   );
   return Math.max(1, Math.min(steamIdsMax, 100));
+}
+
+export function steamStoreRateLimitMaxRequests(): number {
+  const maxRequests = parseNonNegativeInt(
+    process.env.STEAM_STORE_RATE_LIMIT_MAX_REQUESTS,
+    STEAM_STORE_RATE_LIMIT_MAX_REQUESTS
+  );
+  return Math.min(maxRequests, STEAM_STORE_RATE_LIMIT_MAX_REQUESTS_MAX);
+}
+
+export function steamStoreRateLimitEnabled(): boolean {
+  return steamStoreRateLimitMaxRequests() > 0;
+}
+
+export function steamStoreRateLimitWindowMs(): number {
+  const windowMs = parsePositiveInt(
+    process.env.STEAM_STORE_RATE_LIMIT_WINDOW_MS,
+    STEAM_STORE_RATE_LIMIT_WINDOW_MS
+  );
+  return Math.max(1000, Math.min(windowMs, STEAM_STORE_RATE_LIMIT_WINDOW_MAX_MS));
+}
+
+export function steamStoreRateLimitMinIntervalMs(): number {
+  const intervalMs = parseNonNegativeInt(
+    process.env.STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS,
+    STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MS
+  );
+  return Math.min(intervalMs, STEAM_STORE_RATE_LIMIT_MIN_INTERVAL_MAX_MS);
+}
+
+export function steamStoreRateLimitCooldownMs(): number {
+  const cooldownMs = parsePositiveInt(
+    process.env.STEAM_STORE_RATE_LIMIT_COOLDOWN_MS,
+    STEAM_STORE_RATE_LIMIT_COOLDOWN_MS
+  );
+  return Math.max(1000, Math.min(cooldownMs, STEAM_STORE_RATE_LIMIT_COOLDOWN_MAX_MS));
+}
+
+export function steamStoreRateLimitMaxWaitMs(): number {
+  const maxWaitMs = parsePositiveInt(
+    process.env.STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS,
+    STEAM_STORE_RATE_LIMIT_MAX_WAIT_MS
+  );
+  return Math.max(0, Math.min(maxWaitMs, STEAM_STORE_RATE_LIMIT_MAX_WAIT_MAX_MS));
 }
 
 export function steamAppDetailsMaxAttempts(storeCc?: string | null | undefined): number {

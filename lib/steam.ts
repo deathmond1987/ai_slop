@@ -1,4 +1,5 @@
 import "server-only";
+import { processSingleton } from "./process-singleton.ts";
 import { cacheGet, cacheSet, deleteCacheByExactOrPrefix } from "./cache-store";
 import { logDebug, sanitizeDebugError, sanitizeDebugText } from "./debug";
 import { loadWithCacheAndDedupe } from "./cached-dedupe.ts";
@@ -11,6 +12,10 @@ import {
 import { UPCOMING_CACHE_PREFIX } from "./aggregate-cache.ts";
 import { normalizeSteamStoreCc } from "./store-cc.ts";
 import { WISHLIST_CACHE_PREFIX } from "./wishlist-cache-core.ts";
+import {
+  registerSteamStoreFailure,
+  reserveSteamStoreRequest,
+} from "./steam-rate-limit.ts";
 import type { SteamPriceOverview } from "./types";
 import {
   appDetailsCacheKey,
@@ -41,6 +46,18 @@ import {
 
 const API = "https://api.steampowered.com";
 const STORE = "https://store.steampowered.com";
+
+function isSteamStoreUrl(url: string): boolean {
+  return url.startsWith(STORE) || url.includes("store.steampowered.com");
+}
+
+function isStoreRateLimitStatus(status: number | undefined): boolean {
+  return status === 403 || status === 429;
+}
+
+function isStoreRateLimitErrorText(text: string): boolean {
+  return /\bSteam API (?:403|429)\b/i.test(text);
+}
 
 export interface PlayerSummary {
   steamid: string;
@@ -74,39 +91,41 @@ export interface AppDetails {
   price_overview?: SteamPriceOverview;
 }
 
-const pendingOwned = new Map<string, Promise<OwnedGame[]>>();
+const pendingOwned = processSingleton("steam.pendingOwned", () => new Map<string, Promise<OwnedGame[]>>());
 export type AppDetailsPriority = "normal" | "low";
 
-const pendingAppDetails = new Map<string, Promise<AppDetails | null | AppDetailsTransientMiss>>();
-let nextAppDetailsRequestAtMs = 0;
-let activeAppDetailsFetches = 0;
-let activeLowAppDetailsFetches = 0;
-const pendingNormalAppDetailsFetchSlots: Array<() => void> = [];
-const pendingLowAppDetailsFetchSlots: Array<() => void> = [];
+const pendingAppDetails = processSingleton("steam.pendingAppDetails", () => new Map<string, Promise<AppDetails | null | AppDetailsTransientMiss>>());
+const appDetailsPool = processSingleton("steam.appDetailsPool", () => ({
+  nextRequestAtMs: 0,
+  active: 0,
+  activeLow: 0,
+  pendingNormal: [] as Array<() => void>,
+  pendingLow: [] as Array<() => void>,
+}));
 
 async function acquireAppDetailsFetchSlot(priority: AppDetailsPriority = "normal"): Promise<() => void> {
   const max = steamAppDetailsConcurrency();
   const lowMax = Math.max(1, Math.min(3, max));
-  const pending = priority === "low" ? pendingLowAppDetailsFetchSlots : pendingNormalAppDetailsFetchSlots;
+  const pending = priority === "low" ? appDetailsPool.pendingLow : appDetailsPool.pendingNormal;
   while (
-    activeAppDetailsFetches >= max ||
-    (priority === "low" && activeLowAppDetailsFetches >= lowMax)
+    appDetailsPool.active >= max ||
+    (priority === "low" && appDetailsPool.activeLow >= lowMax)
   ) {
     await new Promise<void>((resolve) => {
       pending.push(resolve);
     });
   }
 
-  activeAppDetailsFetches += 1;
-  if (priority === "low") activeLowAppDetailsFetches += 1;
+  appDetailsPool.active += 1;
+  if (priority === "low") appDetailsPool.activeLow += 1;
   let released = false;
 
   return () => {
     if (released) return;
     released = true;
-    activeAppDetailsFetches -= 1;
-    if (priority === "low") activeLowAppDetailsFetches -= 1;
-    const next = pendingNormalAppDetailsFetchSlots.shift() ?? pendingLowAppDetailsFetchSlots.shift();
+    appDetailsPool.active -= 1;
+    if (priority === "low") appDetailsPool.activeLow -= 1;
+    const next = appDetailsPool.pendingNormal.shift() ?? appDetailsPool.pendingLow.shift();
     if (next) next();
   };
 }
@@ -123,7 +142,12 @@ async function jsonFetch(url: string, timeoutMs = steamFetchTimeoutMs()): Promis
       },
     });
     status = res.status;
-    if (!res.ok) throw new Error(`Steam API ${res.status}: ${sanitizeDebugText(url)}`);
+    if (!res.ok) {
+      if (isSteamStoreUrl(url) && isStoreRateLimitStatus(status)) {
+        registerSteamStoreFailure(url, status, res.headers.get("Retry-After"));
+      }
+      throw new Error(`Steam API ${res.status}: ${sanitizeDebugText(url)}`);
+    }
     return res.json();
   } catch (error) {
     const safeMessage = sanitizeDebugError(error);
@@ -141,7 +165,7 @@ export async function getPlayerSummaries(steamIds: string[], key?: string): Prom
   return data?.response?.players ?? [];
 }
 
-const pendingProfile = new Map<string, Promise<SteamProfile>>();
+const pendingProfile = processSingleton("steam.pendingProfile", () => new Map<string, Promise<SteamProfile>>());
 
 export async function getSteamProfile(steamId: string, key?: string): Promise<SteamProfile> {
   return loadWithCacheAndDedupe({
@@ -296,22 +320,48 @@ async function fetchOwnedGames(steamId: string, key: string): Promise<OwnedGame[
 }
 
 function isTransientAppDetailsFetchError(error: unknown): boolean {
-  return /timeout|aborted|fetch failed|network|\b(?:429|500|502|503|504)\b/i.test(sanitizeDebugError(error));
+  return /timeout|aborted|fetch failed|network|\b(?:403|429|500|502|503|504)\b/i.test(
+    sanitizeDebugError(error)
+  );
 }
 
-async function reserveAppDetailsRequestSlot(appid: number): Promise<void> {
+async function reserveAppDetailsIntervalSlot(appid: number): Promise<boolean> {
   const minIntervalMs = steamAppDetailsMinIntervalMs();
-  if (minIntervalMs <= 0) return;
+  if (minIntervalMs <= 0) return true;
 
   const now = Date.now();
-  const waitMs = Math.max(0, nextAppDetailsRequestAtMs - now);
+  const waitMs = Math.max(0, appDetailsPool.nextRequestAtMs - now);
   const reservedAt = now + waitMs;
-  nextAppDetailsRequestAtMs = reservedAt + minIntervalMs;
+  appDetailsPool.nextRequestAtMs = reservedAt + minIntervalMs;
 
   if (waitMs > 0) {
     logDebug("steam.appdetails.paced", { appid, waitMs });
     await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
+
+  return true;
+}
+
+async function reserveAppDetailsRequestSlot(appid: number, url: string): Promise<boolean> {
+  if (!(await reserveAppDetailsIntervalSlot(appid))) return false;
+
+  const reservation = await reserveSteamStoreRequest(url);
+  if (!reservation.allowed) {
+    logDebug("steam.storeRateLimit.blocked", {
+      appid,
+      blockedMs: reservation.blockedMs,
+    });
+    return false;
+  }
+
+  if (reservation.waitedMs > 0) {
+    logDebug("steam.storeRateLimit.waited", {
+      appid,
+      waitedMs: reservation.waitedMs,
+    });
+  }
+
+  return true;
 }
 
 async function fetchAppDetails(
@@ -346,7 +396,9 @@ async function fetchAppDetails(
   let primaryErrorText = "";
 
   try {
-    await reserveAppDetailsRequestSlot(appid);
+    if (!(await reserveAppDetailsRequestSlot(appid, primaryUrl))) {
+      return finish(APP_DETAILS_TRANSIENT_MISS);
+    }
     const release = await acquireAppDetailsFetchSlot(priority);
     try {
       const data = (await jsonFetch(
@@ -369,7 +421,8 @@ async function fetchAppDetails(
     });
   }
 
-  if (!steamAppDetailsFallbackEnabled()) {
+  const primaryRateLimited = isStoreRateLimitErrorText(primaryErrorText);
+  if (!steamAppDetailsFallbackEnabled() || primaryRateLimited) {
     return finish(sawTransientFetchFailure && !sawConfirmedNegative ? APP_DETAILS_TRANSIENT_MISS : null);
   }
 
@@ -394,7 +447,13 @@ async function fetchAppDetails(
 
   for (const attempt of fallbackAttempts) {
     try {
-      await reserveAppDetailsRequestSlot(appid);
+      if (!(await reserveAppDetailsRequestSlot(appid, attempt.url))) {
+        logDebug("steam.appdetails.fallback_blocked", {
+          appid,
+          url: sanitizeDebugText(attempt.url),
+        });
+        continue;
+      }
       const release = await acquireAppDetailsFetchSlot(priority);
       try {
         const fallbackData = (await jsonFetch(
