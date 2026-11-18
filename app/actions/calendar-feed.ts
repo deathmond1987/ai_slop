@@ -16,7 +16,7 @@ function monthFromFormData(formData: FormData): string | undefined {
   return month >= 1 && month <= 12 ? raw : undefined;
 }
 
-function viewFromFormData(formData: FormData): "grid" | "list" {
+function viewFromFormData(formData: FormData): "grid" | "list" | "history" {
   const raw = formData.get("view");
   return parseView(typeof raw === "string" ? raw : undefined) ?? "grid";
 }

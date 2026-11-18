@@ -5,6 +5,7 @@ import { CalendarFeed } from "@/components/CalendarFeed";
 import { CalendarFeedSkeleton } from "@/components/CalendarFeedSkeleton";
 import { CalendarSubscriptionMenu } from "@/components/CalendarSubscriptionMenu";
 import { CalendarViewToggle } from "@/components/CalendarViewToggle";
+import { HistoryView } from "@/components/HistoryView";
 import { getCalendarFeedToken } from "@/lib/auth-store";
 import {
   calendarFeedPath,
@@ -16,8 +17,26 @@ import { logDebug } from "@/lib/debug";
 import { getLang, getT } from "@/lib/i18n";
 import { getExternalOriginFromHeaders } from "@/lib/requestOrigin";
 import { requireSteamSession } from "@/lib/session";
+import type { IdentifiedSession } from "@/lib/types";
+import { collectUpcoming } from "@/lib/upcoming";
+import { reconcileManualReleaseDates } from "@/lib/manual-release-dates";
+import { earlyAccessStoreCc } from "@/lib/early-access-core.ts";
+import { mergeManualReleaseDates } from "@/lib/manual-release-dates-core.ts";
 
 export const dynamic = "force-dynamic";
+
+/** Streamed counter for the "by dates" tab; reuses the cached calendar collection. */
+async function CalendarUpcomingCount({ session }: { session: IdentifiedSession }) {
+  const collected = await collectUpcoming(session, session.rawgApiKey ?? process.env.RAWG_API_KEY);
+  const manualEntries = await reconcileManualReleaseDates(
+    session.steamId,
+    earlyAccessStoreCc(session.storeCc)
+  );
+  const count = mergeManualReleaseDates(collected.games, manualEntries).filter(
+    (game) => game.releaseDate || typeof game.releaseYear === "number"
+  ).length;
+  return <span className="calendar-view-count">{count}</span>;
+}
 
 function parseMonth(raw: string | string[] | undefined): { year: number; month1: number } {
   const today = new Date();
@@ -75,7 +94,18 @@ export default async function CalendarPage({
       <div className="flex items-center justify-between flex-wrap gap-2 text-xs">
         <div className="flex items-center gap-1 flex-wrap">
           <h1 className="sr-only">{t("calendar.title")}</h1>
-          <CalendarViewToggle lang={lang} view={view} side={side} year={year} month1={month1} />
+          <CalendarViewToggle
+            lang={lang}
+            view={view}
+            side={side}
+            year={year}
+            month1={month1}
+            countSlot={
+              <Suspense fallback={null}>
+                <CalendarUpcomingCount session={session} />
+              </Suspense>
+            }
+          />
         </div>
         <CalendarSubscriptionMenu
           steamId={session.steamId}
@@ -89,9 +119,13 @@ export default async function CalendarPage({
         />
       </div>
 
-      <Suspense fallback={<CalendarFeedSkeleton view={view} />}>
-        <CalendarFeed session={session} lang={lang} view={view} side={side} year={year} month1={month1} />
-      </Suspense>
+      {view === "history" ? (
+        <HistoryView lang={lang} />
+      ) : (
+        <Suspense fallback={<CalendarFeedSkeleton view={view} />}>
+          <CalendarFeed session={session} lang={lang} view={view} side={side} year={year} month1={month1} />
+        </Suspense>
+      )}
     </section>
   );
 }

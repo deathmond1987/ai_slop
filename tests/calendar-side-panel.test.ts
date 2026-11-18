@@ -30,7 +30,12 @@ test("calendar side state is encoded in the query and preserved through view swi
 
   assert.match(page, /const side = parseCalendarSide\(sp\.side\);/);
   assert.match(page, /<h1 className="sr-only">\{t\("calendar\.title"\)\}<\/h1>[\s\S]*<CalendarViewToggle/);
-  assert.match(page, /<CalendarViewToggle lang=\{lang\} view=\{view\} side=\{side\}/);
+  assert.match(
+    page,
+    /<CalendarViewToggle[\s\S]*?lang=\{lang\}[\s\S]*?view=\{view\}[\s\S]*?side=\{side\}/
+  );
+  // The counter must stream inside Suspense so the header is not blocked.
+  assert.match(page, /<Suspense fallback=\{null\}>[\s\S]*<CalendarUpcomingCount/);
   assert.match(page, /<CalendarFeed session=\{session\} lang=\{lang\} view=\{view\} side=\{side\}/);
   assert.doesNotMatch(page, /import \{ calendarSideQueryValue,/);
 });
@@ -41,7 +46,11 @@ test("calendar feed renders without waiting for early access and lets the side p
   const route = read("app/api/early-access/route.ts");
 
   assert.doesNotMatch(feed, /getEarlyAccessSessionResult/);
-  assert.match(feed, /const result = await collectUpcoming\(session, session\.rawgApiKey \?\? process\.env\.RAWG_API_KEY\);/);
+  assert.match(
+    feed,
+    /const (?:collected|result) = await collectUpcoming\(session, session\.rawgApiKey \?\? process\.env\.RAWG_API_KEY\);/
+  );
+  assert.match(feed, /mergeManualReleaseDates\(collected\.games, manualEntries\)/);
   assert.match(
     feed,
     /const query: Record<string, string \| number> = \{[\s\S]*side: calendarSideQueryValue\(side\),/

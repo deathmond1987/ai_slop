@@ -1,6 +1,6 @@
 import "server-only";
 import { logDebug } from "./debug";
-import { getStatementRow, prepare, runStatement } from "./sqlite";
+import { getDb, getStatementRow, prepare, runStatement, withTransaction } from "./sqlite";
 
 export interface CacheEntry<T> {
   key: string;
@@ -160,4 +160,64 @@ export async function listCacheEntriesByExactOrPrefix<T>(
     });
     return [];
   }
+}
+
+/**
+ * Batch variant of cacheGet: one query per chunk instead of one query per key.
+ * Missing/expired keys are simply absent from the result map.
+ */
+export async function cacheGetMany(keys: readonly string[]): Promise<Map<string, unknown>> {
+  const out = new Map<string, unknown>();
+  const unique = [...new Set(keys)];
+  if (unique.length === 0) return out;
+
+  pruneExpired();
+  const db = await getDb();
+  if (!db) return out;
+
+  const now = Date.now();
+  for (let i = 0; i < unique.length; i += 400) {
+    const chunk = unique.slice(i, i + 400);
+    const placeholders = chunk.map(() => "?").join(",");
+    const sql = `SELECT key, value FROM cache_entries WHERE key IN (${placeholders}) AND expires_at > ?`;
+    try {
+      const rows = db.prepare(sql).all(...chunk, now) as {
+        key?: unknown;
+        value?: unknown;
+      }[];
+      for (const row of rows) {
+        if (typeof row.key !== "string" || typeof row.value !== "string") continue;
+        try {
+          out.set(row.key, JSON.parse(row.value));
+        } catch {
+          // ignore unparsable rows; they are re-fetched by callers
+        }
+      }
+    } catch (error) {
+      logDebug("cacheStore.getMany.failed", { error: String(error) });
+    }
+  }
+  return out;
+}
+
+/** Batch variant of cacheSet: all entries are written in one transaction. */
+export async function cacheSetMany(entries: readonly { key: string; value: unknown; ttlMs: number }[]): Promise<void> {
+  if (entries.length === 0) return;
+
+  pruneExpired();
+  const now = Date.now();
+  await withTransaction((db) => {
+    const statement = db.prepare(UPSERT_SQL);
+    for (const entry of entries) {
+      if (!Number.isFinite(entry.ttlMs) || entry.ttlMs <= 0) continue;
+      let serialized: unknown;
+      try {
+        serialized = JSON.stringify(entry.value);
+      } catch {
+        continue;
+      }
+      if (typeof serialized !== "string") continue;
+      statement.run(entry.key, serialized, now + entry.ttlMs, now);
+    }
+  });
 }

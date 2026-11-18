@@ -1,11 +1,11 @@
-export type CalendarView = "grid" | "list";
+export type CalendarView = "grid" | "list" | "history";
 export type CalendarSide = "tbd" | "earlyAccess";
 
 export const VIEW_COOKIE = "calendar_view";
 
 export function parseView(raw: string | string[] | undefined): CalendarView | null {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  if (value === "grid" || value === "list") return value;
+  if (value === "grid" || value === "list" || value === "history") return value;
   return null;
 }
 

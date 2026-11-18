@@ -1,4 +1,5 @@
 import { setCalendarView } from "@/app/actions/calendar-view";
+import type { ReactNode } from "react";
 import { tFor } from "@/lib/i18n";
 import { calendarSideQueryValue, type CalendarSide, type CalendarView } from "@/lib/display-mode";
 import type { Lang } from "@/lib/types";
@@ -9,12 +10,14 @@ export function CalendarViewToggle({
   side,
   year,
   month1,
+  countSlot,
 }: {
   lang: Lang;
   view: CalendarView;
   side: CalendarSide;
   year: number;
   month1: number;
+  countSlot?: ReactNode;
 }) {
   const t = tFor(lang);
   const monthValue = `${year}-${String(month1).padStart(2, "0")}`;
@@ -32,6 +35,10 @@ export function CalendarViewToggle({
       </button>
       <button type="submit" name="view" value="list" className={view === "list" ? active : inactive}>
         {t("calendar.view.list")}
+        {countSlot}
+      </button>
+      <button type="submit" name="view" value="history" className={view === "history" ? active : inactive}>
+        {t("calendar.view.history")}
       </button>
     </form>
   );

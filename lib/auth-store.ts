@@ -92,7 +92,7 @@ export interface UserSettingsUpdate {
 }
 
 export interface UserPreferences {
-  calendarView?: "grid" | "list";
+  calendarView?: "grid" | "list" | "history";
   lang?: Lang;
 }
 
@@ -490,14 +490,16 @@ export async function getUserPreferences(steamId: string): Promise<UserPreferenc
 
   return {
     calendarView:
-      row.calendar_view === "grid" || row.calendar_view === "list" ? row.calendar_view : undefined,
+      row.calendar_view === "grid" || row.calendar_view === "list" || row.calendar_view === "history"
+        ? row.calendar_view
+        : undefined,
     lang: row.lang === "ru" || row.lang === "en" ? row.lang : undefined,
   };
 }
 
 export async function saveUserCalendarView(
   steamId: string,
-  calendarView: "grid" | "list"
+  calendarView: "grid" | "list" | "history"
 ): Promise<boolean> {
   const ok = await ensureUserSettingsRow(steamId);
   if (!ok) return false;
