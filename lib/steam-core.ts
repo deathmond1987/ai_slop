@@ -23,8 +23,6 @@ export const STEAM_PROFILE_TIMEOUT_MS = 8000;
 export const STEAM_APPDETAILS_TIMEOUT_MS = 10000;
 export const STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS = 6000;
 export const STEAM_APPDETAILS_CONCURRENCY = 8;
-export const STEAM_APPDETAILS_MIN_INTERVAL_MS = 100;
-export const STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS = 5000;
 export const STEAM_APPDETAILS_RETRY_DEFAULT_ENABLED = true;
 export const STEAM_APPDETAILS_RETRY_DELAY_MS = 30_000;
 export const STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS = 2;
@@ -85,14 +83,6 @@ export function steamAppDetailsFallbackEnabled(): boolean {
 export function steamAppDetailsConcurrency(): number {
   const concurrency = parsePositiveInt(process.env.STEAM_APPDETAILS_CONCURRENCY, STEAM_APPDETAILS_CONCURRENCY);
   return Math.max(1, Math.min(concurrency, 10));
-}
-
-export function steamAppDetailsMinIntervalMs(): number {
-  const interval = parseNonNegativeInt(
-    process.env.STEAM_APPDETAILS_MIN_INTERVAL_MS,
-    STEAM_APPDETAILS_MIN_INTERVAL_MS
-  );
-  return Math.min(interval, STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS);
 }
 
 export function steamAppDetailsRetryEnabled(): boolean {
@@ -182,8 +172,6 @@ export interface SteamAppDetailsDownloadParams {
   timeoutMs: number;
   fallbackEnabled: boolean;
   fallbackTimeoutMs: number;
-  minIntervalMs: number;
-  minIntervalMaxMs: number;
   maxAttemptsWhenStoreCcPresent: number;
   maxAttemptsWhenStoreCcMissing: number;
   negativeTtlMs: number;
@@ -206,8 +194,6 @@ export function steamAppDetailsDownloadParams(): SteamAppDetailsDownloadParams {
     timeoutMs: steamAppDetailsTimeoutMs(),
     fallbackEnabled,
     fallbackTimeoutMs: steamAppDetailsFallbackTimeoutMs(),
-    minIntervalMs: steamAppDetailsMinIntervalMs(),
-    minIntervalMaxMs: STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS,
     maxAttemptsWhenStoreCcPresent,
     maxAttemptsWhenStoreCcMissing,
     negativeTtlMs: APP_DETAILS_NEGATIVE_TTL_MS,

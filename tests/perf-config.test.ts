@@ -7,8 +7,6 @@ import {
 import {
   STEAM_APPDETAILS_CONCURRENCY,
   STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS,
-  STEAM_APPDETAILS_MIN_INTERVAL_MS,
-  STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS,
   STEAM_APPDETAILS_RETRY_MAX_ATTEMPTS,
   STEAM_APPDETAILS_RETRY_QUEUE_MAX,
   STEAM_APPDETAILS_RETRY_STEAM_IDS_MAX,
@@ -19,7 +17,6 @@ import {
   steamAppDetailsFallbackEnabled,
   steamAppDetailsFallbackTimeoutMs,
   steamAppDetailsMaxAttempts,
-  steamAppDetailsMinIntervalMs,
   steamAppDetailsRetryEnabled,
   steamAppDetailsRetryMaxAttempts,
   steamAppDetailsRetryQueueMax,
@@ -102,14 +99,12 @@ test("Steam appdetails timeouts and fallback default to conservative values", ()
       STEAM_APPDETAILS_FALLBACK: undefined,
       STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS: undefined,
       STEAM_APPDETAILS_CONCURRENCY: undefined,
-      STEAM_APPDETAILS_MIN_INTERVAL_MS: undefined,
     },
     () => {
       assert.equal(steamAppDetailsTimeoutMs(), STEAM_APPDETAILS_TIMEOUT_MS);
       assert.equal(steamAppDetailsFallbackTimeoutMs(), STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS);
       assert.equal(steamAppDetailsFallbackEnabled(), true);
       assert.equal(steamAppDetailsConcurrency(), STEAM_APPDETAILS_CONCURRENCY);
-      assert.equal(steamAppDetailsMinIntervalMs(), STEAM_APPDETAILS_MIN_INTERVAL_MS);
     }
   );
 });
@@ -121,14 +116,12 @@ test("Steam appdetails env overrides are bounded and parsed", () => {
       STEAM_APPDETAILS_FALLBACK: "false",
       STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS: "1500",
       STEAM_APPDETAILS_CONCURRENCY: "9",
-      STEAM_APPDETAILS_MIN_INTERVAL_MS: "30",
     },
     () => {
       assert.equal(steamAppDetailsTimeoutMs(), 7000);
       assert.equal(steamAppDetailsFallbackEnabled(), false);
       assert.equal(steamAppDetailsFallbackTimeoutMs(), 1500);
       assert.equal(steamAppDetailsConcurrency(), 9);
-      assert.equal(steamAppDetailsMinIntervalMs(), 30);
     }
   );
 
@@ -138,32 +131,12 @@ test("Steam appdetails env overrides are bounded and parsed", () => {
       STEAM_APPDETAILS_FALLBACK: "nope",
       STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS: "-1",
       STEAM_APPDETAILS_CONCURRENCY: "99",
-      STEAM_APPDETAILS_MIN_INTERVAL_MS: "-1",
     },
     () => {
       assert.equal(steamAppDetailsTimeoutMs(), STEAM_APPDETAILS_TIMEOUT_MS);
       assert.equal(steamAppDetailsFallbackEnabled(), true);
       assert.equal(steamAppDetailsFallbackTimeoutMs(), STEAM_APPDETAILS_FALLBACK_TIMEOUT_MS);
       assert.equal(steamAppDetailsConcurrency(), 10);
-      assert.equal(steamAppDetailsMinIntervalMs(), STEAM_APPDETAILS_MIN_INTERVAL_MS);
-    }
-  );
-
-  withEnv(
-    {
-      STEAM_APPDETAILS_MIN_INTERVAL_MS: "0",
-    },
-    () => {
-      assert.equal(steamAppDetailsMinIntervalMs(), 0);
-    }
-  );
-
-  withEnv(
-    {
-      STEAM_APPDETAILS_MIN_INTERVAL_MS: String(STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS + 1),
-    },
-    () => {
-      assert.equal(steamAppDetailsMinIntervalMs(), STEAM_APPDETAILS_MIN_INTERVAL_MAX_MS);
     }
   );
 });

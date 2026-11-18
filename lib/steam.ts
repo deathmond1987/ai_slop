@@ -33,7 +33,6 @@ import {
   steamAppDetailsFallbackTimeoutMs,
   steamAppDetailsDebugParamsEnabled,
   steamAppDetailsMaxAttempts,
-  steamAppDetailsMinIntervalMs,
   steamAppDetailsRetryEnabled,
   steamAppDetailsTimeoutMs,
   steamFetchTimeoutMs,
@@ -96,7 +95,6 @@ export type AppDetailsPriority = "normal" | "low";
 
 const pendingAppDetails = processSingleton("steam.pendingAppDetails", () => new Map<string, Promise<AppDetails | null | AppDetailsTransientMiss>>());
 const appDetailsPool = processSingleton("steam.appDetailsPool", () => ({
-  nextRequestAtMs: 0,
   active: 0,
   activeLow: 0,
   pendingNormal: [] as Array<() => void>,
@@ -325,26 +323,8 @@ function isTransientAppDetailsFetchError(error: unknown): boolean {
   );
 }
 
-async function reserveAppDetailsIntervalSlot(appid: number): Promise<boolean> {
-  const minIntervalMs = steamAppDetailsMinIntervalMs();
-  if (minIntervalMs <= 0) return true;
-
-  const now = Date.now();
-  const waitMs = Math.max(0, appDetailsPool.nextRequestAtMs - now);
-  const reservedAt = now + waitMs;
-  appDetailsPool.nextRequestAtMs = reservedAt + minIntervalMs;
-
-  if (waitMs > 0) {
-    logDebug("steam.appdetails.paced", { appid, waitMs });
-    await new Promise((resolve) => setTimeout(resolve, waitMs));
-  }
-
-  return true;
-}
-
+/** Single pacing point for store.steampowered.com: the Store rate limiter. */
 async function reserveAppDetailsRequestSlot(appid: number, url: string): Promise<boolean> {
-  if (!(await reserveAppDetailsIntervalSlot(appid))) return false;
-
   const reservation = await reserveSteamStoreRequest(url);
   if (!reservation.allowed) {
     logDebug("steam.storeRateLimit.blocked", {
